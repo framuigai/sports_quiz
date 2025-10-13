@@ -1,0 +1,21 @@
+# Flutter / Dart
+**/build/
+**/.dart_tool/
+**/.flutter-plugins*
+**/.packages
+*.iml
+
+# Android / iOS
+android/.gradle/
+ios/Pods/
+ios/Runner.xcworkspace/
+
+# Firebase configs (keep local)
+mobile/android/app/google-services.json
+mobile/ios/Runner/GoogleService-Info.plist
+
+# Python
+backend/.venv/
+backend/.env
+__pycache__/
+*.pyc

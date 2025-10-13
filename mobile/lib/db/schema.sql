@@ -1,0 +1,1 @@
+CREATE TABLE IF NOT EXISTS local_quizzes(id TEXT);
