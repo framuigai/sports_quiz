@@ -1,1 +1,22 @@
-name: sports_quiz_mobile_v2
+# pubspec.yaml
+name: sports_quiz
+description: MVP Football Quiz app (Flutter)
+publish_to: "none"
+
+# ✅ EXPLAINS TO PUB WHICH DART VERSIONS THIS APP SUPPORTS.
+# Use a range so upgrades don't break you unexpectedly.
+environment:
+  sdk: ">=3.7.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
