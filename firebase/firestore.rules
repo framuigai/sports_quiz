@@ -1,1 +1,63 @@
-rules_version='2';
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: check authenticated (not anonymous)
+    function isSignedIn() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    // -----------------------
+    // Quizzes collection
+    // -----------------------
+    match /quizzes/{quizId} {
+
+      // READ rules:
+      // 1) Admin/global quizzes visible iff:
+      //    is_admin_quiz==true AND available_to_all==true AND is_approved==true AND deleted==0
+      // 2) Private (user/AI) quizzes visible only to owner_id == uid AND deleted==0
+      allow get, list: if isSignedIn() && (
+        (
+          resource.data.is_admin_quiz == true &&
+          resource.data.available_to_all == true &&
+          resource.data.is_approved == true &&
+          resource.data.deleted == 0
+        ) ||
+        (
+          resource.data.owner_id == request.auth.uid &&
+          resource.data.deleted == 0
+        )
+      );
+
+      // WRITE rules:
+      // - Clients are NOT allowed to create/update/delete quizzes.
+      //   (Only server/admin dashboard writes via Admin SDK.)
+      allow create, update, delete: if false;
+    }
+
+    // -----------------------
+    // Attempts collection
+    // -----------------------
+    match /attempts/{attemptId} {
+      // READ: only the owner can read their attempts and only if not soft-deleted
+      allow get, list: if isSignedIn() &&
+        resource.data.user_id == request.auth.uid &&
+        resource.data.deleted == 0;
+
+      // WRITE: a signed-in user can create attempts for themselves only.
+      // We also force some fields on create.
+      allow create: if isSignedIn() &&
+        request.resource.data.user_id == request.auth.uid &&
+        request.resource.data.deleted == 0;
+
+      // Users may NOT update attempts (immutable record) or delete them directly.
+      // (Moderation/cleanup via admin backend will perform soft-deletes.)
+      allow update, delete: if false;
+    }
+
+    // (Optional) Users collection: restrict each user doc to self
+    match /users/{uid} {
+      allow read, write: if isSignedIn() && request.auth.uid == uid;
+    }
+  }
+}
