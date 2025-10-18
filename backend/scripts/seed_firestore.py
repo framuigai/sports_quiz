@@ -4,7 +4,10 @@ from firebase_admin import credentials, firestore
 
 # Use the service-account file relative to this script
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .../backend
-SA_PATH = os.path.join(BASE_DIR, "credentials", "service-account.json")
+SA_PATH = os.path.join(BASE_DIR, "credentials", "service_account.json")
+
+
+print(BASE_DIR, SA_PATH)
 
 if not os.path.exists(SA_PATH):
     raise FileNotFoundError(f"Service account not found at: {SA_PATH}")
