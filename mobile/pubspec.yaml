@@ -3,17 +3,23 @@ name: sports_quiz
 description: MVP Football Quiz app (Flutter)
 publish_to: "none"
 
-# ✅ EXPLAINS TO PUB WHICH DART VERSIONS THIS APP SUPPORTS.
-# Use a range so upgrades don't break you unexpectedly.
 environment:
   sdk: ">=3.7.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.8
+
+  # Firebase (aligned versions)
   firebase_core: ^4.2.0
+  cloud_firestore: ^6.0.3
   firebase_auth: ^6.1.1
+
+  # Local storage / utils
+  sqflite: ^2.4.0
+  path: ^1.9.0
+
+  cupertino_icons: ^1.0.8
 
 dev_dependencies:
   flutter_test:

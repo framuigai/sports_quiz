@@ -1,27 +1,16 @@
 // lib/main.dart
-//
-// PURPOSE:
-//  - Minimal demonstration of Firebase Auth with Flutter.
-//  - Allows sign-up, sign-in, and sign-out using email/password.
-//  - Automatically reacts to auth changes and shows the correct screen.
-//
-// NEXT STEPS (future days):
-//  - Add Firestore and tie quizzes to logged-in users.
-
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'services/firebase_service.dart';
+import 'package:firebase_core/firebase_core.dart';
+
+import 'firebase_options.dart';                      // flutterfire-generated
+import 'services/sqlite_service.dart';               // creates quiz_cache.db from schema.sql
+import 'services/cache_repository.dart';             // local cache helpers
+import 'services/firestore_service.dart';            // fetches admin quizzes -> cache
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  try {
-    // ✅ Initialize Firebase before the UI starts.
-    await FirebaseService.I.init();
-  } catch (e) {
-    debugPrint('Firebase initialization failed: $e');
-  }
-
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await SQLiteService.init();
   runApp(const MyApp());
 }
 
@@ -32,166 +21,86 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Sports Quiz',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
-        useMaterial3: true,
-      ),
-      // ✅ Automatically switch UI based on sign-in state.
-      home: StreamBuilder<User?>(
-        stream: FirebaseService.I.authState(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            // While checking auth state, show a spinner.
-            return const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            );
-          }
-          final user = snapshot.data;
-          if (user == null) {
-            return const AuthScreen(); // Not signed in → show login form.
-          } else {
-            return HomeScreen(userEmail: user.email ?? 'No Email');
-          }
-        },
-      ),
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),
+      home: const GlobalQuizzesPage(),
     );
   }
 }
 
-// ✅ Login/Signup Screen
-class AuthScreen extends StatefulWidget {
-  const AuthScreen({super.key});
+class GlobalQuizzesPage extends StatefulWidget {
+  const GlobalQuizzesPage({super.key});
+
   @override
-  State<AuthScreen> createState() => _AuthScreenState();
+  State<GlobalQuizzesPage> createState() => _GlobalQuizzesPageState();
 }
 
-class _AuthScreenState extends State<AuthScreen> {
-  final _email = TextEditingController();
-  final _password = TextEditingController();
-  bool _isSignIn = true;
-  bool _busy = false;
-  String? _error;
+class _GlobalQuizzesPageState extends State<GlobalQuizzesPage> {
+  bool _loading = true;
+  List<Map<String, dynamic>> _quizzes = [];
 
-  // ✅ Handles login/signup based on _isSignIn flag.
-  Future<void> _submit() async {
-    // Close keyboard before submitting
-    FocusScope.of(context).unfocus();
+  @override
+  void initState() {
+    super.initState();
+    _loadQuizzes();
+  }
 
+  Future<void> _loadQuizzes() async {
+    // Try Firestore → cache; always read from cache after
+    await FirestoreService.fetchGlobalQuizzes();
+    final cached = await CacheRepository.getAdminQuizzes();
+    if (!mounted) return;
     setState(() {
-      _busy = true;
-      _error = null;
+      _quizzes = cached;
+      _loading = false;
     });
-
-    try {
-      if (_isSignIn) {
-        await FirebaseService.I.signIn(
-          email: _email.text.trim(),
-          password: _password.text,
-        );
-      } else {
-        await FirebaseService.I.signUp(
-          email: _email.text.trim(),
-          password: _password.text,
-        );
-      }
-    } catch (e) {
-      // TODO: map FirebaseAuthException to friendly messages later
-      setState(() => _error = e.toString());
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(_isSignIn ? 'Sign In' : 'Sign Up')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            // ✅ Show error banner when any auth error occurs.
-            if (_error != null)
-              Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(_error!, style: const TextStyle(color: Colors.red)),
-              ),
-
-            // ✅ Email Field
-            TextField(
-              controller: _email,
-              decoration: const InputDecoration(
-                labelText: 'Email',
-                hintText: 'you@example.com',
-              ),
-              keyboardType: TextInputType.emailAddress,
-            ),
-            const SizedBox(height: 12),
-
-            // ✅ Password Field
-            TextField(
-              controller: _password,
-              decoration: const InputDecoration(labelText: 'Password'),
-              obscureText: true,
-            ),
-            const SizedBox(height: 16),
-
-            // ✅ Sign-in / Sign-up button
-            FilledButton(
-              onPressed: _busy ? null : _submit,
-              child: _busy
-                  ? const SizedBox(
-                      height: 18,
-                      width: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text(_isSignIn ? 'Sign In' : 'Create Account'),
-            ),
-
-            // ✅ Toggle between Sign In and Sign Up.
-            TextButton(
-              onPressed: _busy ? null : () => setState(() => _isSignIn = !_isSignIn),
-              child: Text(
-                _isSignIn
-                    ? 'Need an account? Sign Up'
-                    : 'Have an account? Sign In',
-              ),
-            ),
-          ],
-        ),
-      ),
+  Future<void> _insertDummy() async {
+    await CacheRepository.insertDummyQuiz();
+    final cached = await CacheRepository.getAdminQuizzes();
+    if (!mounted) return;
+    setState(() => _quizzes = cached);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Dummy quiz inserted into SQLite')),
     );
   }
-}
-
-// ✅ Home Screen (shown after login)
-class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key, required this.userEmail});
-  final String userEmail;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Signed in as $userEmail'),
+        title: const Text('Global Quizzes'),
         actions: [
           IconButton(
-            tooltip: 'Sign out',
-            onPressed: () => FirebaseService.I.signOut(),
-            icon: const Icon(Icons.logout),
+            tooltip: 'Dev: Insert Dummy',
+            onPressed: _insertDummy,
+            icon: const Icon(Icons.bug_report),
+          ),
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: () async {
+              setState(() => _loading = true);
+              await _loadQuizzes();
+            },
+            icon: const Icon(Icons.refresh),
           ),
         ],
       ),
-      body: const Center(
-        child: Text(
-          '✅ Day 2 Complete — Firebase Auth is working!',
-          style: TextStyle(fontSize: 18),
-        ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _quizzes.isEmpty
+          ? const Center(child: Text('No quizzes available'))
+          : ListView.separated(
+        itemCount: _quizzes.length,
+        separatorBuilder: (_, __) => const Divider(height: 1),
+        itemBuilder: (context, i) {
+          final q = _quizzes[i];
+          return ListTile(
+            title: Text(q['title'] ?? 'Untitled'),
+            subtitle: Text('Difficulty: ${q['difficulty'] ?? 'N/A'}'),
+          );
+        },
       ),
     );
   }
