@@ -1,1 +1,47 @@
-<html><body>{% block content %}{% endblock %}</body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}Admin | SportsQuiz{% endblock %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+  <script defer src="{{ url_for('static', filename='js/admin.js') }}"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="{{ url_for('admin.dashboard') }}">SportsQuiz Admin</a>
+      <nav class="nav">
+        <a href="{{ url_for('admin.dashboard') }}" class="nav__link {% if request.endpoint=='admin.dashboard' %}is-active{% endif %}">Dashboard</a>
+        <a href="{{ url_for('admin.quizzes') }}" class="nav__link {% if request.endpoint=='admin.quizzes' %}is-active{% endif %}">Quizzes</a>
+        <a href="{{ url_for('admin.attempts') }}" class="nav__link {% if request.endpoint=='admin.attempts' %}is-active{% endif %}">Attempts</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-stack">
+          {% for category, message in messages %}
+            <div class="flash flash--{{ category|default('info') }}">
+              <span>{{ message }}</span>
+              <button class="flash__close" aria-label="Dismiss" data-close-flash>&times;</button>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <small>&copy; {{  now().year if callable(now) else '' }} SportsQuiz • Admin Console</small>
+    </div>
+  </footer>
+
+  <script defer src="{{ url_for('static', filename='js/admin.js') }}"></script>
+</body>
+</html>

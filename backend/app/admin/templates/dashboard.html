@@ -1,1 +1,34 @@
-{% extends 'base.html' %}{% block content %}Dashboard{% endblock %}
+{% extends "base.html" %}
+{% block title %}Dashboard | SportsQuiz Admin{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1 class="h1">Admin Dashboard</h1>
+  <p class="muted">Create and manage global quizzes. Toggle availability and review attempts.</p>
+</section>
+
+<section class="grid">
+  <a class="card card--action" href="{{ url_for('admin.create_quiz') }}">
+    <div class="card__header">
+      <h3>Create Quiz</h3>
+    </div>
+    <p>Seed new admin quizzes with visibility and approval flags.</p>
+    <span class="btn btn--primary">New Quiz</span>
+  </a>
+
+  <a class="card card--action" href="{{ url_for('admin.quizzes') }}">
+    <div class="card__header">
+      <h3>View Quizzes</h3>
+    </div>
+    <p>Browse, filter, toggle availability, and soft-delete/restore.</p>
+    <span class="btn">Open List</span>
+  </a>
+
+  <a class="card card--action" href="{{ url_for('admin.attempts') }}">
+    <div class="card__header">
+      <h3>Attempts</h3>
+    </div>
+    <p>Review user attempts and stats (placeholder for now).</p>
+    <span class="btn">View Attempts</span>
+  </a>
+</section>
+{% endblock %}

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}New Quiz | SportsQuiz Admin{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="h1">Create Quiz</h1>
+</div>
+
+<form class="form card" method="post" action="{{ url_for('admin.create_quiz') }}">
+  <div class="form__row">
+    <label for="title">Title <span class="req">*</span></label>
+    <input id="title" name="title" type="text" required placeholder="e.g., World Cup Basics">
+  </div>
+
+  <div class="form__row">
+    <label for="description">Description</label>
+    <textarea id="description" name="description" rows="3" placeholder="Short summary"></textarea>
+  </div>
+
+  <div class="form__row">
+    <label for="difficulty">Difficulty</label>
+    <select id="difficulty" name="difficulty">
+      <option value="easy">easy</option>
+      <option value="medium">medium</option>
+      <option value="hard">hard</option>
+    </select>
+  </div>
+
+  <div class="form__row form__row--inline">
+    <label class="checkbox">
+      <input type="checkbox" name="available_to_all">
+      <span>Available to all</span>
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="is_approved" checked>
+      <span>Approved</span>
+    </label>
+  </div>
+
+  <div class="form__actions">
+    <a href="{{ url_for('admin.quizzes') }}" class="btn btn--ghost">Cancel</a>
+    <button class="btn btn--primary" type="submit">Create</button>
+  </div>
+</form>
+{% endblock %}
