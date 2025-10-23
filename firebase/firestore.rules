@@ -1,10 +1,16 @@
+// firestore.rules
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper: check authenticated (not anonymous)
+    // Helper: check authenticated
     function isSignedIn() {
       return request.auth != null && request.auth.uid != null;
+    }
+
+    // Helper: normalize a "deleted" flag that may be boolean or numeric
+    function isNotDeleted(res) {
+      return !(res.data.deleted == true || res.data.deleted == 1);
     }
 
     // -----------------------
@@ -12,50 +18,46 @@ service cloud.firestore {
     // -----------------------
     match /quizzes/{quizId} {
 
-      // READ rules:
+      // READ:
       // 1) Admin/global quizzes visible iff:
-      //    is_admin_quiz==true AND available_to_all==true AND is_approved==true AND deleted==0
-      // 2) Private (user/AI) quizzes visible only to owner_id == uid AND deleted==0
+      //    is_admin_quiz==true AND available_to_all==true AND is_approved==true AND deleted==false
+      // 2) Private quizzes visible only to owner_id == uid AND deleted==false
       allow get, list: if isSignedIn() && (
         (
-          resource.data.is_admin_quiz == true &&
-          resource.data.available_to_all == true &&
-          resource.data.is_approved == true &&
-          resource.data.deleted == 0
+          // admin/global path
+          (resource.data.is_admin_quiz == true) &&
+          (resource.data.available_to_all == true) &&
+          (resource.data.is_approved == true) &&
+          isNotDeleted(resource)
         ) ||
         (
-          resource.data.owner_id == request.auth.uid &&
-          resource.data.deleted == 0
+          // owner path
+          (resource.data.owner_id == request.auth.uid) &&
+          isNotDeleted(resource)
         )
       );
 
-      // WRITE rules:
-      // - Clients are NOT allowed to create/update/delete quizzes.
-      //   (Only server/admin dashboard writes via Admin SDK.)
+      // WRITE:
+      // Client writes are blocked (Admin SDK/back-end only).
       allow create, update, delete: if false;
     }
 
     // -----------------------
-    // Attempts collection
+    // Attempts collection (optional for later)
     // -----------------------
     match /attempts/{attemptId} {
-      // READ: only the owner can read their attempts and only if not soft-deleted
       allow get, list: if isSignedIn() &&
         resource.data.user_id == request.auth.uid &&
-        resource.data.deleted == 0;
+        !(resource.data.deleted == true || resource.data.deleted == 1);
 
-      // WRITE: a signed-in user can create attempts for themselves only.
-      // We also force some fields on create.
       allow create: if isSignedIn() &&
         request.resource.data.user_id == request.auth.uid &&
-        request.resource.data.deleted == 0;
+        !(request.resource.data.deleted == true || request.resource.data.deleted == 1);
 
-      // Users may NOT update attempts (immutable record) or delete them directly.
-      // (Moderation/cleanup via admin backend will perform soft-deletes.)
       allow update, delete: if false;
     }
 
-    // (Optional) Users collection: restrict each user doc to self
+    // Users (optional)
     match /users/{uid} {
       allow read, write: if isSignedIn() && request.auth.uid == uid;
     }
