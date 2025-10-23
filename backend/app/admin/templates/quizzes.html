@@ -10,14 +10,20 @@
 
 <form method="get" class="toolbar">
   <div class="toolbar__group">
+    <!-- Hidden inputs ensure unchecked boxes submit "0" instead of nothing -->
+    <input type="hidden" name="include_deleted" value="0">
     <label class="switch">
       <input type="checkbox" name="include_deleted" value="1" {% if include_deleted %}checked{% endif %} onchange="this.form.submit()">
       <span>Include deleted</span>
     </label>
+
+    <input type="hidden" name="include_unapproved" value="0">
     <label class="switch">
       <input type="checkbox" name="include_unapproved" value="1" {% if include_unapproved %}checked{% endif %} onchange="this.form.submit()">
       <span>Include unapproved</span>
     </label>
+
+    <input type="hidden" name="only_admin" value="0">
     <label class="switch">
       <input type="checkbox" name="only_admin" value="1" {% if only_admin %}checked{% endif %} onchange="this.form.submit()">
       <span>Admin-only</span>
@@ -49,7 +55,7 @@
             <td>{{ 'Yes' if q.is_approved else 'No' }}</td>
             <td>{{ q.deleted|default(0) }}</td>
             <td>
-              {% if q.updated_at %}{{ q.updated_at|int }}{% else %}—{% endif %}
+              {% if q.updated_at %}{{ q.updated_at|humants }}{% else %}—{% endif %}
             </td>
             <td class="ta-right">
               <a class="btn btn--small" href="{{ url_for('admin.quiz_detail', doc_id=q.id) }}">Open</a>

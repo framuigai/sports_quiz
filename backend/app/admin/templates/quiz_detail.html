@@ -16,8 +16,8 @@
       <div><strong>Available to all:</strong> {{ 'Yes' if quiz.available_to_all else 'No' }}</div>
       <div><strong>Approved:</strong> {{ 'Yes' if quiz.is_approved else 'No' }}</div>
       <div><strong>Deleted:</strong> {{ quiz.deleted|default(0) }}</div>
-      <div><strong>Created:</strong> {{ quiz.created_at|default('—') }}</div>
-      <div><strong>Updated:</strong> {{ quiz.updated_at|default('—') }}</div>
+      <div><strong>Created:</strong> {% if quiz.created_at %}{{ quiz.created_at|humants }}{% else %}—{% endif %}</div>
+      <div><strong>Updated:</strong> {% if quiz.updated_at %}{{ quiz.updated_at|humants }}{% else %}—{% endif %}</div>
       <div><strong>Doc ID:</strong> <code>{{ quiz.id|default('') }}</code></div>
     </div>
   </div>
@@ -25,7 +25,6 @@
   <div class="card">
     <h3 class="h3">Actions</h3>
     <div class="actions actions--stack">
-      <!-- Placeholder forms/links; wire to real endpoints in Step 3 -->
       <form method="post" action="{{ url_for('admin.toggle_available', doc_id=quiz.id) }}">
         <button class="btn btn--primary" type="submit">
           {{ 'Make Unavailable' if quiz.available_to_all else 'Make Available' }}
