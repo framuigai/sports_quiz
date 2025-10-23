@@ -6,11 +6,14 @@ import 'firebase_options.dart';                      // flutterfire-generated
 import 'services/sqlite_service.dart';               // creates quiz_cache.db from schema.sql
 import 'services/cache_repository.dart';             // local cache helpers
 import 'services/firestore_service.dart';            // fetches admin quizzes -> cache
+import 'services/auth_service.dart';                 // ✅ ensure signed-in for Firestore rules
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await SQLiteService.init();
+  // ✅ Make sure we are authenticated before hitting Firestore
+  await AuthService.ensureSignedIn();
   runApp(const MyApp());
 }
 
@@ -46,14 +49,24 @@ class _GlobalQuizzesPageState extends State<GlobalQuizzesPage> {
   }
 
   Future<void> _loadQuizzes() async {
-    // Try Firestore → cache; always read from cache after
-    await FirestoreService.fetchGlobalQuizzes();
+    try {
+      // Try Firestore → cache; always read from cache after
+      await FirestoreService.fetchGlobalQuizzes();
+    } catch (_) {
+      // ignore; we always read cache below
+    }
     final cached = await CacheRepository.getAdminQuizzes();
     if (!mounted) return;
     setState(() {
       _quizzes = cached;
       _loading = false;
     });
+    if (cached.isEmpty) {
+      // Optional UX hint
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No quizzes in cache yet. Add a dummy or seed Firestore.')),
+      );
+    }
   }
 
   Future<void> _insertDummy() async {
