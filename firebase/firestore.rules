@@ -1,14 +1,16 @@
-// firestore.rules
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper: check authenticated
+    // -----------------------
+    // Helpers
+    // -----------------------
     function isSignedIn() {
+      // Supports anonymous auth (uid present)
       return request.auth != null && request.auth.uid != null;
     }
 
-    // Helper: normalize a "deleted" flag that may be boolean or numeric
+    // deleted can be boolean true or numeric 1 depending on writer
     function isNotDeleted(res) {
       return !(res.data.deleted == true || res.data.deleted == 1);
     }
@@ -18,33 +20,36 @@ service cloud.firestore {
     // -----------------------
     match /quizzes/{quizId} {
 
-      // READ:
-      // 1) Admin/global quizzes visible iff:
-      //    is_admin_quiz==true AND available_to_all==true AND is_approved==true AND deleted==false
-      // 2) Private quizzes visible only to owner_id == uid AND deleted==false
+      // READ (get + list/queries):
+      // 1) Global/admin quizzes are visible ONLY when:
+      //    is_admin_quiz == true && available_to_all == true &&
+      //    is_approved == true && deleted == 0/false
+      //
+      // 2) (Optional) Private quizzes visible to owner (if you later add owner_id)
       allow get, list: if isSignedIn() && (
         (
-          // admin/global path
-          (resource.data.is_admin_quiz == true) &&
-          (resource.data.available_to_all == true) &&
-          (resource.data.is_approved == true) &&
+          resource.data.is_admin_quiz == true &&
+          resource.data.available_to_all == true &&
+          resource.data.is_approved == true &&
           isNotDeleted(resource)
-        ) ||
-        (
-          // owner path
-          (resource.data.owner_id == request.auth.uid) &&
+        ) || (
+          // Owner-only visibility support (for future non-admin quizzes)
+          resource.data.owner_id == request.auth.uid &&
           isNotDeleted(resource)
         )
       );
 
-      // WRITE:
-      // Client writes are blocked (Admin SDK/back-end only).
+      // WRITE: DISALLOW all client-side writes.
+      // Admin SDK (your Flask backend using service account) BYPASSES rules.
       allow create, update, delete: if false;
     }
 
     // -----------------------
-    // Attempts collection (optional for later)
+    // Attempts collection (future)
     // -----------------------
+    // Users can read their own attempts (not deleted)
+    // Users can create attempts for themselves (not deleted)
+    // No client updates/deletes (server can handle moderation if needed)
     match /attempts/{attemptId} {
       allow get, list: if isSignedIn() &&
         resource.data.user_id == request.auth.uid &&
@@ -57,9 +62,19 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // Users (optional)
+    // -----------------------
+    // Users profile (optional)
+    // -----------------------
     match /users/{uid} {
       allow read, write: if isSignedIn() && request.auth.uid == uid;
     }
+
+    // Default deny everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
   }
 }
+
+
+
