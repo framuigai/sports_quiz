@@ -3,6 +3,9 @@ import 'package:sqflite/sqflite.dart';
 import 'sqlite_service.dart';
 
 class CacheRepository {
+  // -------------------------
+  // QUIZZES
+  // -------------------------
   static Future<void> saveAdminQuiz(Map<String, dynamic> quiz) async {
     await SQLiteService.db.insert(
       'cache_admin_quizzes',
@@ -18,7 +21,7 @@ class CacheRepository {
     );
   }
 
-  // Dev helper for Day 4 acceptance
+  // Dev helper for testing
   static Future<void> insertDummyQuiz() async {
     await saveAdminQuiz({
       'quiz_id': 'dummy1',
@@ -34,5 +37,29 @@ class CacheRepository {
       'created_at': DateTime.now().toIso8601String(),
       'updated_at': DateTime.now().toIso8601String(),
     });
+  }
+
+  // -------------------------
+  // 🧩 QUESTIONS (new for Player)
+  // -------------------------
+  static Future<void> saveAdminQuestions(List<Map<String, dynamic>> questions) async {
+    final batch = SQLiteService.db.batch();
+    for (final q in questions) {
+      batch.insert(
+        'cache_admin_questions',
+        q,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  static Future<List<Map<String, dynamic>>> getQuestionsByQuizId(String quizId) async {
+    return SQLiteService.db.query(
+      'cache_admin_questions',
+      where: 'quiz_id = ?',
+      whereArgs: [quizId],
+      orderBy: 'index ASC',
+    );
   }
 }

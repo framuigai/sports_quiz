@@ -42,6 +42,21 @@ service cloud.firestore {
       // WRITE: DISALLOW all client-side writes.
       // Admin SDK (your Flask backend using service account) BYPASSES rules.
       allow create, update, delete: if false;
+
+      // -----------------------
+      // 🧩 NEW: Questions subcollection (READ-ONLY for clients)
+      // -----------------------
+      match /questions/{qid} {
+        // Allow reads only if the PARENT quiz is visible under the same constraints
+        allow get, list: if isSignedIn() &&
+          get(/databases/$(database)/documents/quizzes/$(quizId)).data.is_admin_quiz == true &&
+          get(/databases/$(database)/documents/quizzes/$(quizId)).data.available_to_all == true &&
+          get(/databases/$(database)/documents/quizzes/$(quizId)).data.is_approved == true &&
+          isNotDeleted(get(/databases/$(database)/documents/quizzes/$(quizId)));
+
+        // No client-side writes; Admin SDK only
+        allow create, update, delete: if false;
+      }
     }
 
     // -----------------------
@@ -75,6 +90,3 @@ service cloud.firestore {
     }
   }
 }
-
-
-

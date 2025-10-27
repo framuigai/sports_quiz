@@ -2,20 +2,23 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 
-import 'firebase_options.dart';                      // flutterfire-generated
-import 'services/sqlite_service.dart';               // creates quiz_cache.db from schema.sql
-import 'services/cache_repository.dart';             // local cache helpers
-import 'services/firestore_service.dart';            // fetches admin quizzes -> cache
-import 'services/auth_service.dart';                 // ensure signed-in (per your current flow)
-import 'services/firebase_service.dart';             // analytics wrapper
-import 'widgets/snackbar_helper.dart';               // NEW: reusable snackbars
+import 'firebase_options.dart'; // flutterfire-generated
+import 'services/sqlite_service.dart'; // creates quiz_cache.db from schema.sql
+import 'services/cache_repository.dart'; // local cache helpers
+import 'services/firestore_service.dart'; // fetches admin quizzes -> cache
+import 'services/auth_service.dart'; // ensure signed-in (per your current flow)
+import 'services/firebase_service.dart'; // analytics wrapper
+import 'widgets/snackbar_helper.dart'; // reusable snackbars
+
+// 🧩 NEW import for quiz player navigation
+import 'pages/quiz_player_page.dart'; // we’ll create this next
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await SQLiteService.init();
-  await AuthService.ensureSignedIn();                // your existing auth flow
-  await FirebaseService.I.init();                    // make sure analytics is ready
+  await AuthService.ensureSignedIn(); // existing auth flow
+  await FirebaseService.I.init(); // make sure analytics is ready
   runApp(const MyApp());
 }
 
@@ -42,13 +45,12 @@ class GlobalQuizzesPage extends StatefulWidget {
 
 class _GlobalQuizzesPageState extends State<GlobalQuizzesPage> {
   bool _loading = true;
-  String? _error; // holds last fetch error (if any)
+  String? _error;
   List<Map<String, dynamic>> _quizzes = [];
 
   @override
   void initState() {
     super.initState();
-    // Step 3 analytics: screen viewed
     FirebaseService.I.logQuizListViewed();
     _loadQuizzes(firstLoad: true);
   }
@@ -59,33 +61,28 @@ class _GlobalQuizzesPageState extends State<GlobalQuizzesPage> {
       _error = null;
     });
 
-    // 1) Try server fetch (it will also write to cache if successful)
     final outcome = await FirestoreService.fetchGlobalQuizzes();
-
-    // 2) Always read cache for rendering
     final cached = await CacheRepository.getAdminQuizzes();
 
     if (!mounted) return;
     setState(() {
       _quizzes = cached;
       _loading = false;
-      _error = outcome.status == FetchStatus.error ? (outcome.errorMessage ?? 'Failed to load') : null;
+      _error = outcome.status == FetchStatus.error
+          ? (outcome.errorMessage ?? 'Failed to load')
+          : null;
     });
 
-    // 3) Snackbars: server vs cache visibility
     if (outcome.status == FetchStatus.successFromServer) {
-      if (!firstLoad) {
-        SnackbarHelper.showInfo(context, 'Updated from server.');
-      }
+      if (!firstLoad) SnackbarHelper.showInfo(context, 'Updated from server.');
     } else if (outcome.status == FetchStatus.error) {
       if (cached.isNotEmpty) {
-        SnackbarHelper.showInfo(context, 'Showing cached data (offline or error).');
+        SnackbarHelper.showInfo(context, 'Showing cached data (offline).');
       } else {
-        SnackbarHelper.showError(context, 'Couldn’t load quizzes. Check connection and retry.');
+        SnackbarHelper.showError(context, 'Couldn’t load quizzes.');
       }
     } else if (cached.isEmpty) {
-      // No items at all
-      SnackbarHelper.showInfo(context, 'No quizzes yet. Pull to refresh later.');
+      SnackbarHelper.showInfo(context, 'No quizzes yet.');
     }
   }
 
@@ -120,21 +117,13 @@ class _GlobalQuizzesPageState extends State<GlobalQuizzesPage> {
   }
 
   Widget _buildBody() {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
+    if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null && _quizzes.isEmpty) {
-      // Inline error with retry if nothing to show
       return _ErrorState(message: _error!, onRetry: () => _loadQuizzes());
     }
+    if (_quizzes.isEmpty) return _EmptyState(onRetry: () => _loadQuizzes());
 
-    if (_quizzes.isEmpty) {
-      // Friendly empty state + retry
-      return _EmptyState(onRetry: () => _loadQuizzes());
-    }
-
-    // Success state
+    // 🧩 MAIN CHANGE → tapping a quiz now navigates to the Player page
     return RefreshIndicator(
       onRefresh: () => _loadQuizzes(),
       child: ListView.separated(
@@ -151,7 +140,17 @@ class _GlobalQuizzesPageState extends State<GlobalQuizzesPage> {
                 quizId: q['quiz_id']?.toString() ?? '',
                 title: q['title']?.toString() ?? '',
               );
-              // TODO: Navigate to quiz details/player in Week 2.
+              // 🧩 Navigate to quiz player page
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => QuizPlayerPage(
+                    quizId: q['quiz_id']?.toString() ?? '',
+                    title: q['title']?.toString() ?? 'Untitled Quiz',
+                    difficulty: q['difficulty']?.toString() ?? 'medium',
+                  ),
+                ),
+              );
             },
           );
         },

@@ -1,5 +1,7 @@
+{# backend/app/admin/templates/quiz_detail.html #}
 {% extends "base.html" %}
 {% block title %}Quiz Detail | SportsQuiz Admin{% endblock %}
+
 {% block content %}
 <div class="page-header">
   <h1 class="h1">Quiz Detail</h1>
@@ -31,6 +33,7 @@
         </button>
       </form>
 
+      {# Keeping the quiz-level soft delete/restore from Day 6. Questions will be hard-deleted for now. #}
       {% if quiz.deleted == 1 %}
       <form method="post" action="{{ url_for('admin.restore_quiz', doc_id=quiz.id) }}">
         <button class="btn" type="submit">Restore</button>
@@ -40,6 +43,27 @@
         <button class="btn btn--danger" type="submit" data-confirm="Soft delete this quiz? You can restore later.">Soft Delete</button>
       </form>
       {% endif %}
+    </div>
+  </div>
+</div>
+
+{# 🧩 NEW: Questions summary & entry point to Questions CRUD #}
+<div class="card mt-16">
+  <div class="card__header">
+    <h3 class="h3">Questions</h3>
+  </div>
+  <div class="meta">
+    <div>
+      <strong>Total Questions:</strong>
+      {# questions_count is added by routes.py in quiz_detail() #}
+      {{ questions_count if questions_count is not none else '—' }}
+    </div>
+    <div class="actions mt-12">
+      <a class="btn btn--primary" href="{{ url_for('admin.questions_list', doc_id=quiz.id) }}">Manage Questions</a>
+      {# Explanation:
+         - "Manage Questions" navigates to /admin/quizzes/<doc_id>/questions (list page)
+         - There you'll be able to create, edit, and hard-delete.
+      #}
     </div>
   </div>
 </div>

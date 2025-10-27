@@ -1,0 +1,100 @@
+{# backend/app/admin/templates/question_form.html #}
+{% extends "base.html" %}
+{% set is_edit = (mode == 'edit') %}
+{% block title %}{{ 'Edit' if is_edit else 'New' }} Question | {{ quiz.title or 'Quiz' }} | SportsQuiz Admin{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="h1">{{ 'Edit' if is_edit else 'New' }} Question</h1>
+    <p class="muted">
+      <strong>{{ quiz.title }}</strong>
+      <span class="sep">|</span>
+      Difficulty: <span class="cap">{{ quiz.difficulty|default('easy') }}</span>
+    </p>
+  </div>
+  <div class="actions">
+    <a class="btn" href="{{ url_for('admin.questions_list', doc_id=quiz.id) }}">← Back to Questions</a>
+  </div>
+</div>
+
+{# Determine POST action based on mode #}
+{% if is_edit %}
+  {% set action_url = url_for('admin.question_edit', doc_id=quiz.id, qid=question.id) %}
+{% else %}
+  {% set action_url = url_for('admin.question_new', doc_id=quiz.id) %}
+{% endif %}
+
+<form class="form card" method="post" action="{{ action_url }}">
+  <div class="grid grid--2">
+    <div class="form__row">
+      <label for="index">Index <span class="req">*</span></label>
+      <input id="index" name="index" type="number" min="0" required
+             value="{{ (question.index if question else 0) }}">
+      <small class="muted">Question order in the quiz (0-based).</small>
+    </div>
+
+    <div class="form__row">
+      <label for="correct_index">Correct Option <span class="req">*</span></label>
+      {% set correct = (question.correct_index if question is not none else 0) %}
+      <select id="correct_index" name="correct_index" required>
+        <option value="0" {% if correct == 0 %}selected{% endif %}>0 (A)</option>
+        <option value="1" {% if correct == 1 %}selected{% endif %}>1 (B)</option>
+        <option value="2" {% if correct == 2 %}selected{% endif %}>2 (C)</option>
+        <option value="3" {% if correct == 3 %}selected{% endif %}>3 (D)</option>
+      </select>
+      <small class="muted">Matches the option index below.</small>
+    </div>
+  </div>
+
+  <div class="form__row">
+    <label for="text">Question Text <span class="req">*</span></label>
+    <textarea id="text" name="text" rows="3" required placeholder="e.g., Who won the FIFA World Cup in 2014?">{{ question.text if question else '' }}</textarea>
+  </div>
+
+  <div class="grid grid--2">
+    <div class="form__row">
+      <label for="options_0">Option A <span class="req">*</span></label>
+      <input id="options_0" name="options_0" type="text" required
+             value="{{ (question.options[0] if question and question.options and question.options|length > 0 else '') }}">
+    </div>
+    <div class="form__row">
+      <label for="options_1">Option B <span class="req">*</span></label>
+      <input id="options_1" name="options_1" type="text" required
+             value="{{ (question.options[1] if question and question.options and question.options|length > 1 else '') }}">
+    </div>
+    <div class="form__row">
+      <label for="options_2">Option C <span class="req">*</span></label>
+      <input id="options_2" name="options_2" type="text" required
+             value="{{ (question.options[2] if question and question.options and question.options|length > 2 else '') }}">
+    </div>
+    <div class="form__row">
+      <label for="options_3">Option D <span class="req">*</span></label>
+      <input id="options_3" name="options_3" type="text" required
+             value="{{ (question.options[3] if question and question.options and question.options|length > 3 else '') }}">
+    </div>
+  </div>
+
+  <div class="form__row">
+    <label for="image_url">Image URL (optional)</label>
+    <input id="image_url" name="image_url" type="url" placeholder="https://…"
+           value="{{ question.image_url if question else '' }}">
+    <small class="muted">Provide a direct URL if the question has an image.</small>
+  </div>
+
+  <div class="form__actions">
+    <a href="{{ url_for('admin.questions_list', doc_id=quiz.id) }}" class="btn btn--ghost">Cancel</a>
+    <button class="btn btn--primary" type="submit">{{ 'Save Changes' if is_edit else 'Create Question' }}</button>
+  </div>
+</form>
+
+{% if is_edit %}
+  <div class="card mt-16">
+    <h3 class="h3">Danger Zone</h3>
+    <p class="muted">Hard delete will permanently remove this question.</p>
+    <form method="post" action="{{ url_for('admin.question_delete', doc_id=quiz.id, qid=question.id) }}" onsubmit="return confirm('Permanently delete this question? This cannot be undone.');">
+      <button class="btn btn--danger" type="submit">Delete Question</button>
+    </form>
+  </div>
+{% endif %}
+{% endblock %}

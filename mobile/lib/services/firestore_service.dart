@@ -19,19 +19,15 @@ class FetchOutcome {
 class FirestoreService {
   static final _db = FirebaseFirestore.instance;
 
-  /// Fetch “global/admin” quizzes and persist to local cache.
-  /// Tolerates both `deleted: 0` (int) and `deleted: false` (bool).
+  /// Fetch global/admin quizzes and persist to local cache.
   static Future<FetchOutcome> fetchGlobalQuizzes() async {
     try {
-      // Query set 1: deleted == 0 (int)
       final qInt = _db
           .collection('quizzes')
           .where('is_admin_quiz', isEqualTo: true)
           .where('available_to_all', isEqualTo: true)
           .where('is_approved', isEqualTo: true)
           .where('deleted', isEqualTo: 0);
-
-      // Query set 2: deleted == false (bool)
       final qBool = _db
           .collection('quizzes')
           .where('is_admin_quiz', isEqualTo: true)
@@ -39,10 +35,7 @@ class FirestoreService {
           .where('is_approved', isEqualTo: true)
           .where('deleted', isEqualTo: false);
 
-      // Run both in parallel
       final results = await Future.wait([qInt.get(), qBool.get()]);
-
-      // Merge without duplicates (by docId)
       final seen = <String>{};
       final allDocs = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
       for (final snap in results) {
@@ -51,7 +44,6 @@ class FirestoreService {
         }
       }
 
-      // Persist to SQLite cache
       for (var doc in allDocs) {
         final data = doc.data();
         final quiz = {
@@ -67,20 +59,51 @@ class FirestoreService {
           'is_approved': data['is_approved'] == true ? 1 : 0,
           'deleted': 0,
           'deleted_at': null,
-          'created_at': (data['created_at']?.toString() ??
-              DateTime.now().toIso8601String()),
-          'updated_at': (data['updated_at']?.toString() ??
-              DateTime.now().toIso8601String()),
+          'created_at': data['created_at']?.toString() ??
+              DateTime.now().toIso8601String(),
+          'updated_at': data['updated_at']?.toString() ??
+              DateTime.now().toIso8601String(),
         };
         await CacheRepository.saveAdminQuiz(quiz);
       }
-
-      // Ignore: print for dev visibility
-      // print('Fetched ${allDocs.length} quizzes from Firestore and cached.');
       return FetchOutcome.success(allDocs.length);
     } catch (e) {
-      // print('Firestore fetch failed (fallback to cache): $e');
       return FetchOutcome.error(e.toString());
+    }
+  }
+
+  // 🧩 NEW: Fetch questions by quizId for the Player screen.
+  static Future<FetchOutcome> fetchQuestionsByQuizId(String quizId) async {
+    try {
+      final query = await _db
+          .collection('quizzes')
+          .doc(quizId)
+          .collection('questions')
+          .get();
+
+      final questions = query.docs.map((d) {
+        final q = d.data();
+        return {
+          'question_id': d.id,
+          'quiz_id': quizId,
+          'index': q['index'] ?? 0,
+          'text': q['text'] ?? '',
+          'options': q['options'] is List
+              ? (q['options'] as List).join('|')
+              : q['options']?.toString() ?? '',
+          'correct_index': q['correct_index'] ?? 0,
+          'image_url': q['image_url'] ?? '',
+          'created_at': q['created_at']?.toString() ??
+              DateTime.now().toIso8601String(),
+          'updated_at': q['updated_at']?.toString() ??
+              DateTime.now().toIso8601String(),
+        };
+      }).toList();
+
+      await CacheRepository.saveAdminQuestions(questions);
+      return FetchOutcome.success(questions.length);
+    } catch (e) {
+      return FetchOutcome.error('Error fetching questions: $e');
     }
   }
 }

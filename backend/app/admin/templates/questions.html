@@ -1,0 +1,96 @@
+{# backend/app/admin/templates/questions.html #}
+{% extends "base.html" %}
+{% block title %}Questions | {{ quiz.title or 'Quiz' }} | SportsQuiz Admin{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="h1">Questions</h1>
+    <p class="muted">
+      <strong>{{ quiz.title }}</strong> &middot;
+      Difficulty: <span class="cap">{{ quiz.difficulty|default('easy') }}</span>
+      <span class="sep">|</span>
+      Ordered by <code>index</code> (ascending)
+    </p>
+  </div>
+  <div class="actions">
+    <a class="btn" href="{{ url_for('admin.quiz_detail', doc_id=quiz.id) }}">← Back to Quiz</a>
+    <a class="btn btn--primary" href="{{ url_for('admin.question_new', doc_id=quiz.id) }}">+ New Question</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width: 80px;">Index</th>
+          <th>Text</th>
+          <th>Options</th>
+          <th style="width: 120px;">Correct</th>
+          <th style="width: 160px;">Updated</th>
+          <th style="width: 160px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if items and items|length > 0 %}
+          {% for q in items %}
+          <tr>
+            <td><code>{{ q.index|default(0) }}</code></td>
+            <td>
+              {% set txt = q.text|default('—') %}
+              {% if txt|length > 120 %}
+                {{ txt[:120] ~ '…' }}
+              {% else %}
+                {{ txt }}
+              {% endif %}
+              {% if q.image_url %}
+                <div class="muted small mt-4">Image: <code>{{ q.image_url }}</code></div>
+              {% endif %}
+            </td>
+            <td>
+              {% if q.options %}
+                <ol class="list--alpha compact">
+                  {% for opt in q.options %}
+                    <li>{{ opt }}</li>
+                  {% endfor %}
+                </ol>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="badge">{{ q.correct_index|default(0) }}</span>
+            </td>
+            <td>
+              {% if q.updated_at %}{{ q.updated_at|humants }}{% else %}—{% endif %}
+            </td>
+            <td class="ta-right">
+              <div class="actions actions--inline">
+                <a class="btn btn--small" href="{{ url_for('admin.question_edit', doc_id=quiz.id, qid=q.id) }}">Edit</a>
+                <form method="post" action="{{ url_for('admin.question_delete', doc_id=quiz.id, qid=q.id) }}" onsubmit="return confirm('Permanently delete this question? This cannot be undone.');">
+                  <button class="btn btn--small btn--danger" type="submit">Delete</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="6" class="muted ta-center">No questions yet. Click <strong>New Question</strong> to add the first one.</td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="muted small mt-8">
+  <p><strong>Tips</strong></p>
+  <ul class="list--bullets compact">
+    <li>Use consecutive <code>index</code> values (0, 1, 2, …) for predictable order in the mobile player.</li>
+    <li>We’re doing <strong>hard delete</strong> for now; we can switch to soft-delete later.</li>
+    <li>If Firestore prompts for a composite index after adding filters/order, follow the link to auto-create it.</li>
+  </ul>
+</div>
+{% endblock %}

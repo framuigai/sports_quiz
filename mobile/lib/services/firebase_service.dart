@@ -112,6 +112,25 @@ class FirebaseService {
     }
   }
 
+  /// Log when quiz play actually starts (Player page loaded with questions).
+  Future<void> logQuizStarted({
+    required String quizId,
+    required String title,
+  }) async {
+    try {
+      await _analytics?.logEvent(
+        name: 'quiz_started',
+        parameters: <String, Object>{
+          'quiz_id': quizId,
+          'title': title,
+        },
+      );
+    } catch (e) {
+      // ignore: avoid_print
+      print('Analytics logQuizStarted failed: $e');
+    }
+  }
+
   /// Log when an anonymous login succeeds (for admins or test users).
   Future<void> logLoginAnonymous() async {
     try {

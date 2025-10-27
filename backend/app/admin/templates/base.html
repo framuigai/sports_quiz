@@ -19,6 +19,9 @@
     </div>
   </header>
 
+  {# 🧩 Small hook: child templates may inject a sub-header/breadcrumb via this block #}
+  {% block subheader %}{% endblock %}
+
   <main class="container">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}

@@ -1,8 +1,8 @@
+# backend/app/admin/routes.py
 from __future__ import annotations
 
 import time
-from dataclasses import asdict, dataclass
-from typing import Dict, Any
+from typing import Any, Dict, List
 
 from flask import (
     Blueprint,
@@ -43,6 +43,11 @@ def _quiz_ref(doc_id: str) -> firestore.DocumentReference:
     return _db().collection("quizzes").document(doc_id)
 
 
+def _question_collection(quiz_id: str) -> firestore.CollectionReference:
+    """Return the subcollection reference for questions of a quiz."""
+    return _quiz_ref(quiz_id).collection("questions")
+
+
 def _build_base_query(
     include_deleted: bool,
     include_unapproved: bool,
@@ -61,9 +66,6 @@ def _build_base_query(
     return q
 
 
-# -----------------------------
-# Optional simple guard
-# -----------------------------
 def _admin_guard_ok(req: request) -> bool:
     """
     Minimal optional guard using a header or query param for development.
@@ -112,7 +114,7 @@ def quizzes():
             include_unapproved=include_unapproved,
             only_admin=only_admin,
         )
-        items = []
+        items: List[Dict[str, Any]] = []
         for snap in query.stream():
             data = snap.to_dict() or {}
             data["id"] = snap.id
@@ -184,7 +186,7 @@ def create_quiz():
 
 
 # -----------------------------
-# Quiz Detail
+# Quiz Detail (with questions_count)
 # -----------------------------
 @admin_bp.route("/quizzes/<doc_id>")
 def quiz_detail(doc_id: str):
@@ -197,7 +199,19 @@ def quiz_detail(doc_id: str):
     quiz.setdefault("available_to_all", False)
     quiz.setdefault("is_approved", False)
     quiz.setdefault("difficulty", "easy")
-    return render_template("quiz_detail.html", quiz=quiz)
+
+    # 🧩 NEW: compute questions_count from subcollection
+    try:
+        # For dev-scale it’s fine to stream and count. For big data, switch to count() aggregate.
+        count = 0
+        for _ in _question_collection(doc_id).stream():
+            count += 1
+        questions_count = count
+    except Exception as e:
+        questions_count = None
+        flash(f"Failed to compute questions count: {e}", "warning")
+
+    return render_template("quiz_detail.html", quiz=quiz, questions_count=questions_count)
 
 
 # -----------------------------
@@ -207,15 +221,16 @@ def quiz_detail(doc_id: str):
 def toggle_available(doc_id: str):
     ref = _quiz_ref(doc_id)
     try:
+        @firestore.transactional
         def txn_op(tx: firestore.Transaction):
-            snap = ref.get(transaction=tx)
+            snap = tx.get(ref)
             if not snap.exists:
                 raise NotFound("Quiz not found")
             data = snap.to_dict() or {}
             current = bool(data.get("available_to_all", False))
             tx.update(ref, {"available_to_all": not current, "updated_at": _now()})
-
-        _db().transaction()(txn_op)  # run transaction
+        txn = _db().transaction()
+        txn_op(txn)
         flash("Availability toggled.", "success")
     except Exception as e:
         flash(f"Failed to toggle availability: {e}", "error")
@@ -223,7 +238,7 @@ def toggle_available(doc_id: str):
 
 
 # -----------------------------
-# Soft Delete
+# Soft Delete / Restore (quiz-level; unchanged)
 # -----------------------------
 @admin_bp.route("/quizzes/<doc_id>/soft-delete", methods=["POST"])
 def soft_delete_quiz(doc_id: str):
@@ -235,9 +250,6 @@ def soft_delete_quiz(doc_id: str):
     return redirect(url_for("admin.quiz_detail", doc_id=doc_id))
 
 
-# -----------------------------
-# Restore
-# -----------------------------
 @admin_bp.route("/quizzes/<doc_id>/restore", methods=["POST"])
 def restore_quiz(doc_id: str):
     try:
@@ -246,3 +258,218 @@ def restore_quiz(doc_id: str):
     except Exception as e:
         flash(f"Failed to restore: {e}", "error")
     return redirect(url_for("admin.quiz_detail", doc_id=doc_id))
+
+
+# =====================================================================
+#                           QUESTIONS CRUD (Day 9)
+#   Storage layout: quizzes/{doc_id}/questions/{qid}
+#   NOTE: We are using HARD DELETE now. We can switch to soft-delete later.
+# =====================================================================
+
+def _as_int(value: Any, fallback: int = 0) -> int:
+    try:
+        if isinstance(value, bool):
+            return int(value)
+        return int(value)
+    except Exception:
+        return fallback
+
+
+def _split_4(texts: List[str]) -> List[str]:
+    """Ensure exactly 4 trimmed strings; pad with empty if fewer; truncate if more."""
+    out = [ (t or "").strip() for t in texts ]
+    if len(out) < 4:
+        out += [""] * (4 - len(out))
+    return out[:4]
+
+
+def _validate_question_payload(form: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Validate and normalize question payload from form.
+    Expected inputs:
+      - index (int >= 0)
+      - text (non-empty)
+      - options[0..3] (non-empty strings; exactly 4)
+      - correct_index (0..3)
+      - image_url (optional)
+    Returns a dict ready to write to Firestore.
+    Raises ValueError with readable messages if invalid.
+    """
+    idx_raw = form.get("index", "").strip()
+    text = (form.get("text") or "").strip()
+    opt0 = (form.get("options_0") or "").strip()
+    opt1 = (form.get("options_1") or "").strip()
+    opt2 = (form.get("options_2") or "").strip()
+    opt3 = (form.get("options_3") or "").strip()
+    correct_raw = (form.get("correct_index") or "").strip()
+    image_url = (form.get("image_url") or "").strip()
+
+    if not text:
+        raise ValueError("Question text is required.")
+
+    index = _as_int(idx_raw, fallback=-1)
+    if index < 0:
+        raise ValueError("Index must be a non-negative integer.")
+
+    options = _split_4([opt0, opt1, opt2, opt3])
+    if any(o == "" for o in options):
+        raise ValueError("All 4 options are required (no blanks).")
+
+    correct_index = _as_int(correct_raw, fallback=-1)
+    if correct_index not in (0, 1, 2, 3):
+        raise ValueError("correct_index must be one of 0, 1, 2, 3.")
+
+    now = _now()
+    return {
+        "index": index,
+        "text": text,
+        "options": options,           # stored as array in Firestore
+        "correct_index": correct_index,
+        "image_url": image_url,
+        "deleted": 0,                 # reserved for soft-delete later
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+@admin_bp.route("/quizzes/<doc_id>/questions")
+def questions_list(doc_id: str):
+    """
+    List all questions for a quiz ordered by index.
+    """
+    # Ensure quiz exists
+    quiz_snap = _quiz_ref(doc_id).get()
+    if not quiz_snap.exists:
+        raise NotFound("Quiz not found")
+
+    # Fetch questions
+    items: List[Dict[str, Any]] = []
+    try:
+        q = _question_collection(doc_id).order_by("index")
+        for snap in q.stream():
+            data = snap.to_dict() or {}
+            data["id"] = snap.id
+            # defaults for template resilience
+            data.setdefault("image_url", "")
+            data.setdefault("correct_index", 0)
+            data.setdefault("index", 0)
+            data.setdefault("updated_at", 0)
+            items.append(data)
+    except Exception as e:
+        flash(f"Failed to load questions: {e}", "error")
+
+    # For header/meta
+    quiz = quiz_snap.to_dict() or {}
+    quiz["id"] = quiz_snap.id
+    quiz.setdefault("title", "—")
+    quiz.setdefault("difficulty", "easy")
+
+    return render_template(
+        "questions.html",  # will be created next step
+        quiz=quiz,
+        items=items,
+    )
+
+
+@admin_bp.route("/quizzes/<doc_id>/questions/new", methods=["GET", "POST"])
+def question_new(doc_id: str):
+    """
+    Create a new question.
+    """
+    # Ensure quiz exists
+    quiz_snap = _quiz_ref(doc_id).get()
+    if not quiz_snap.exists:
+        raise NotFound("Quiz not found")
+
+    quiz = quiz_snap.to_dict() or {}
+    quiz["id"] = doc_id
+
+    if request.method == "GET":
+        # Render empty form
+        return render_template(
+            "question_form.html",     # will be created next step
+            quiz=quiz,
+            question=None,
+            mode="create",
+        )
+
+    # POST - validate and insert
+    try:
+        payload = _validate_question_payload(request.form)
+        # created_at already set in payload; for create it’s fine
+        _question_collection(doc_id).add(payload)
+        flash("Question created.", "success")
+        return redirect(url_for("admin.questions_list", doc_id=doc_id))
+    except ValueError as ve:
+        flash(str(ve), "error")
+        return redirect(url_for("admin.question_new", doc_id=doc_id))
+    except Exception as e:
+        flash(f"Failed to create question: {e}", "error")
+        return redirect(url_for("admin.question_new", doc_id=doc_id))
+
+
+@admin_bp.route("/quizzes/<doc_id>/questions/<qid>/edit", methods=["GET", "POST"])
+def question_edit(doc_id: str, qid: str):
+    """
+    Edit a question.
+    """
+    # Ensure quiz exists
+    quiz_snap = _quiz_ref(doc_id).get()
+    if not quiz_snap.exists:
+        raise NotFound("Quiz not found")
+    quiz = quiz_snap.to_dict() or {}
+    quiz["id"] = doc_id
+
+    # Ensure question exists
+    qref = _question_collection(doc_id).document(qid)
+    qsnap = qref.get()
+    if not qsnap.exists:
+        raise NotFound("Question not found")
+
+    if request.method == "GET":
+        question = qsnap.to_dict() or {}
+        question["id"] = qid
+        # Normalize for template fields
+        question.setdefault("index", 0)
+        question.setdefault("text", "")
+        question.setdefault("options", ["", "", "", ""])
+        question.setdefault("correct_index", 0)
+        question.setdefault("image_url", "")
+        return render_template(
+            "question_form.html",     # will be created next step
+            quiz=quiz,
+            question=question,
+            mode="edit",
+        )
+
+    # POST - validate and update
+    try:
+        payload = _validate_question_payload(request.form)
+        # Ensure created_at preserved
+        existing = qsnap.to_dict() or {}
+        created_at = existing.get("created_at", _now())
+        payload["created_at"] = created_at
+        payload["updated_at"] = _now()
+        qref.set(payload, merge=False)
+        flash("Question updated.", "success")
+        return redirect(url_for("admin.questions_list", doc_id=doc_id))
+    except ValueError as ve:
+        flash(str(ve), "error")
+        return redirect(url_for("admin.question_edit", doc_id=doc_id, qid=qid))
+    except Exception as e:
+        flash(f"Failed to update question: {e}", "error")
+        return redirect(url_for("admin.question_edit", doc_id=doc_id, qid=qid))
+
+
+@admin_bp.route("/quizzes/<doc_id>/questions/<qid>/delete", methods=["POST"])
+def question_delete(doc_id: str, qid: str):
+    """
+    HARD delete a question (current approach).
+    NOTE: We can switch this to soft-delete later by updating a 'deleted' flag.
+    """
+    try:
+        _question_collection(doc_id).document(qid).delete()
+        flash("Question deleted.", "success")
+    except Exception as e:
+        flash(f"Failed to delete question: {e}", "error")
+    return redirect(url_for("admin.questions_list", doc_id=doc_id))
