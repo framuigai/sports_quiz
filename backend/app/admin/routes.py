@@ -14,7 +14,7 @@ from flask import (
 )
 from google.cloud import firestore
 from werkzeug.exceptions import NotFound
-
+from google.cloud.firestore_v1 import FieldFilter
 from app.firebase_client import get_db
 from app.settings import ADMIN_SECRET
 
@@ -55,15 +55,14 @@ def _build_base_query(
 ) -> firestore.Query:
     q = _db().collection("quizzes")
     if only_admin:
-        q = q.where("is_admin_quiz", "==", True)
+        q = q.where(filter=FieldFilter("is_admin_quiz", "==", True))
     if not include_unapproved:
-        q = q.where("is_approved", "==", True)
+        q = q.where(filter=FieldFilter("is_approved", "==", True))
     if not include_deleted:
-        q = q.where("deleted", "==", 0)
-    # If you add an orderBy here on a field that isn't already indexed with the wheres,
-    # Firestore may prompt to create a composite index.
+        q = q.where(filter=FieldFilter("deleted", "==", 0))
     q = q.order_by("created_at", direction=firestore.Query.DESCENDING)
     return q
+
 
 
 def _admin_guard_ok(req: request) -> bool:
