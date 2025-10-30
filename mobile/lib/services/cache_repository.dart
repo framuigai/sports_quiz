@@ -1,4 +1,5 @@
 // lib/services/cache_repository.dart
+import 'dart:math';
 import 'package:sqflite/sqflite.dart';
 import 'sqlite_service.dart';
 
@@ -61,5 +62,72 @@ class CacheRepository {
       whereArgs: [quizId],
       orderBy: 'index ASC',
     );
+  }
+
+  // -------------------------
+  // 📝 ATTEMPTS (Day 11)
+  // -------------------------
+
+  /// Inserts a completed attempt into the `attempts` table.
+  /// Returns the generated attempt_id (UUID-ish string).
+  static Future<String> insertAttempt(Map<String, dynamic> attempt) async {
+    // attempt should contain:
+    // quiz_id, quiz_title, difficulty, started_at, completed_at,
+    // score, num_correct, num_total
+    // We'll generate attempt_id if not provided.
+    String attemptId =
+    (attempt['attempt_id'] ?? _pseudoUuid('att_')).toString();
+
+    final data = {
+      'attempt_id': attemptId,
+      'quiz_id': attempt['quiz_id']?.toString() ?? '',
+      'quiz_title': attempt['quiz_title']?.toString() ?? '',
+      'difficulty': attempt['difficulty']?.toString() ?? '',
+      'started_at': attempt['started_at']?.toString() ?? '',
+      'completed_at': attempt['completed_at']?.toString() ?? '',
+      'score': attempt['score'] ?? 0,
+      'num_correct': attempt['num_correct'] ?? 0,
+      'num_total': attempt['num_total'] ?? 0,
+    };
+
+    await SQLiteService.db.insert(
+      'attempts',
+      data,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+
+    return attemptId;
+  }
+
+  /// Bulk-insert child answers into `attempt_answers`.
+  /// Each map should include: question_id, q_index, selected_index, correct_index, is_correct
+  static Future<void> insertAttemptAnswers(
+      String attemptId, List<Map<String, dynamic>> answers) async {
+    final batch = SQLiteService.db.batch();
+    for (final a in answers) {
+      batch.insert('attempt_answers', {
+        'attempt_id': attemptId,
+        'question_id': a['question_id']?.toString() ?? '',
+        'q_index': a['q_index'] ?? 0,
+        'selected_index': a['selected_index'] ?? -1,
+        'correct_index': a['correct_index'] ?? -1,
+        'is_correct': (a['is_correct'] == true || a['is_correct'] == 1) ? 1 : 0,
+        'elapsed_ms': a['elapsed_ms'] ?? null,
+      });
+    }
+    await batch.commit(noResult: true);
+  }
+
+  // Optional: later we can add history reads like:
+  // static Future<List<Map<String, dynamic>>> getAttemptsByQuiz(String quizId) async { ... }
+
+  // --- helpers ---
+  static String _pseudoUuid(String prefix) {
+    final r = Random();
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final rand = List.generate(6, (_) => r.nextInt(36))
+        .map((n) => '0123456789abcdefghijklmnopqrstuvwxyz'[n])
+        .join();
+    return '$prefix$ts$rand';
   }
 }

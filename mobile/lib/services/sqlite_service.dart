@@ -24,6 +24,10 @@ class SQLiteService {
       onCreate: (db, version) async {
         await _runSchema(db);
       },
+      onOpen: (db) async {
+        // Day 11: ensure attempts tables exist even if schema.sql wasn't updated yet
+        await _ensureMigrations(db);
+      },
     );
   }
 
@@ -73,5 +77,38 @@ class SQLiteService {
         await txn.execute(stmt);
       }
     });
+  }
+
+  /// Ensure new tables exist (idempotent) without bumping DB version.
+  static Future<void> _ensureMigrations(Database db) async {
+    // attempts
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS attempts (
+        attempt_id   TEXT PRIMARY KEY,
+        quiz_id      TEXT NOT NULL,
+        quiz_title   TEXT NOT NULL,
+        difficulty   TEXT NOT NULL,
+        started_at   TEXT NOT NULL,
+        completed_at TEXT NOT NULL,
+        score        INTEGER NOT NULL,
+        num_correct  INTEGER NOT NULL,
+        num_total    INTEGER NOT NULL
+      );
+    ''');
+
+    // attempt_answers
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS attempt_answers (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        attempt_id    TEXT NOT NULL,
+        question_id   TEXT NOT NULL,
+        q_index       INTEGER NOT NULL,
+        selected_index INTEGER NOT NULL,
+        correct_index  INTEGER NOT NULL,
+        is_correct     INTEGER NOT NULL,
+        elapsed_ms     INTEGER NULL,
+        FOREIGN KEY (attempt_id) REFERENCES attempts(attempt_id) ON DELETE CASCADE
+      );
+    ''');
   }
 }

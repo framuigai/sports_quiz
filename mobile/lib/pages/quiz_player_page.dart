@@ -1,22 +1,26 @@
 // mobile/lib/pages/quiz_player_page.dart
 //
-// Quiz Player skeleton:
+// Quiz Player with play loop (Day 10):
 //  - Accepts quizId, title, difficulty via constructor
 //  - On load: best-effort Firestore fetch → always read from cache
 //  - Renders states: loading / error / empty / ready
-//  - Shows a basic question view with "Next" button (no scoring yet; Day 10 will add logic)
-//  - Logs analytics: quiz_started when questions successfully load
+//  - Shows question view with selectable options, instant feedback, Next/Finish
+//  - Tracks per-question answers (in-memory) and navigates to Summary screen
+//  - Analytics: quiz_started (on questions ready), question_answered, quiz_completed
 //
 // Dependencies: FirestoreService, CacheRepository, SnackbarHelper, FirebaseService,
-// and the Question model.
+// and the Question, Attempt models.
 
 import 'package:flutter/material.dart';
 
 import '../models/question.dart';
+import '../models/attempt.dart';
 import '../services/firestore_service.dart';
 import '../services/cache_repository.dart';
 import '../services/firebase_service.dart';
 import '../widgets/snackbar_helper.dart';
+import '../widgets/option_tile.dart';
+import 'quiz_summary_page.dart';
 
 class QuizPlayerPage extends StatefulWidget {
   final String quizId;
@@ -41,9 +45,16 @@ class _QuizPlayerPageState extends State<QuizPlayerPage> {
   int _currentIndex = 0;
   bool _loggedStarted = false;
 
+  // Day 10 state:
+  int? _selectedIndex;     // index selected for current question
+  bool _showFeedback = false;
+  final List<AnswerRecord> _answers = [];
+  late DateTime _startedAt;
+
   @override
   void initState() {
     super.initState();
+    _startedAt = DateTime.now();
     _loadQuestions(firstLoad: true);
   }
 
@@ -64,6 +75,9 @@ class _QuizPlayerPageState extends State<QuizPlayerPage> {
     setState(() {
       _questions = parsed;
       _currentIndex = 0;
+      _selectedIndex = null;
+      _showFeedback = false;
+      _answers.clear();
       _loading = false;
       _error = (outcome.status == FetchStatus.error && parsed.isEmpty)
           ? (outcome.errorMessage ?? 'Failed to load questions')
@@ -93,14 +107,83 @@ class _QuizPlayerPageState extends State<QuizPlayerPage> {
     }
   }
 
+  void _onOptionTap(int optionIndex) {
+    if (_showFeedback) return; // already answered this question
+    final q = _questions[_currentIndex];
+    final isCorrect = optionIndex == q.correctIndex;
+
+    setState(() {
+      _selectedIndex = optionIndex;
+      _showFeedback = true;
+    });
+
+    // Analytics per question
+    FirebaseService.I.logQuestionAnswered(
+      quizId: widget.quizId,
+      questionId: q.id,
+      isCorrect: isCorrect,
+      selectedIndex: optionIndex,
+    );
+
+    // Record the answer to build Attempt later
+    _answers.add(AnswerRecord(
+      questionId: q.id,
+      questionText: q.text,
+      selectedIndex: optionIndex,
+      correctIndex: q.correctIndex,
+      isCorrect: isCorrect,
+    ));
+  }
+
   void _nextQuestion() {
     if (_questions.isEmpty) return;
-    if (_currentIndex < _questions.length - 1) {
-      setState(() => _currentIndex += 1);
-    } else {
-      // End of quiz → for Day 10/11 we’ll navigate to Summary.
-      SnackbarHelper.showInfo(context, 'End of quiz (summary coming in Week 2).');
+
+    // Require an answer before moving on
+    if (_selectedIndex == null) {
+      SnackbarHelper.showInfo(context, 'Please select an option to continue.');
+      return;
     }
+
+    if (_currentIndex < _questions.length - 1) {
+      setState(() {
+        _currentIndex += 1;
+        _selectedIndex = null;
+        _showFeedback = false;
+      });
+    } else {
+      _finishQuiz();
+    }
+  }
+
+  void _finishQuiz() {
+    final completedAt = DateTime.now();
+    final total = _questions.length;
+    final correct = _answers.where((a) => a.isCorrect).length;
+
+    // Log completion analytics
+    FirebaseService.I.logQuizCompleted(
+      quizId: widget.quizId,
+      title: widget.title,
+      score: correct,
+      total: total,
+    );
+
+    // Build the Attempt and navigate to Summary
+    final attempt = Attempt(
+      quizId: widget.quizId,
+      title: widget.title,
+      totalQuestions: total,
+      correctCount: correct,
+      startedAt: _startedAt,
+      completedAt: completedAt,
+      answers: List<AnswerRecord>.from(_answers),
+    );
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => QuizSummaryPage(attempt: attempt),
+      ),
+    );
   }
 
   @override
@@ -138,6 +221,8 @@ class _QuizPlayerPageState extends State<QuizPlayerPage> {
     }
 
     final q = _questions[_currentIndex];
+    final canAdvance = _selectedIndex != null;
+
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Column(
@@ -147,13 +232,18 @@ class _QuizPlayerPageState extends State<QuizPlayerPage> {
             total: _questions.length,
           ),
           const SizedBox(height: 12),
-          _QuestionCard(question: q),
+          _QuestionCard(
+            question: q,
+            selectedIndex: _selectedIndex,
+            showFeedback: _showFeedback,
+            onTapOption: _onOptionTap,
+          ),
           const Spacer(),
           Row(
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: _nextQuestion,
+                  onPressed: canAdvance ? _nextQuestion : null,
                   icon: Icon(_currentIndex < _questions.length - 1 ? Icons.arrow_forward : Icons.flag),
                   label: Text(_currentIndex < _questions.length - 1 ? 'Next' : 'Finish'),
                 ),
@@ -190,7 +280,16 @@ class _ProgressHeader extends StatelessWidget {
 
 class _QuestionCard extends StatelessWidget {
   final Question question;
-  const _QuestionCard({required this.question});
+  final int? selectedIndex;
+  final bool showFeedback;
+  final void Function(int index) onTapOption;
+
+  const _QuestionCard({
+    required this.question,
+    required this.selectedIndex,
+    required this.showFeedback,
+    required this.onTapOption,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -203,6 +302,17 @@ class _QuestionCard extends StatelessWidget {
             question.text.isEmpty ? 'Untitled question' : question.text,
             style: Theme.of(context).textTheme.titleLarge,
           ),
+          if (question.imageUrl.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.network(
+                question.imageUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           ..._buildOptions(context, question),
         ]),
@@ -212,27 +322,24 @@ class _QuestionCard extends StatelessWidget {
 
   List<Widget> _buildOptions(BuildContext context, Question q) {
     if (q.options.isEmpty) {
-      return [
-        const Text(
+      return const [
+        Text(
           'No options available.',
           style: TextStyle(color: Colors.grey),
         ),
       ];
     }
-    // For Day 8, this is a read-only visual list (no answer selection yet).
+
     return List<Widget>.generate(q.options.length, (i) {
       final text = q.options[i];
-      return Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.black12),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: ListTile(
-          title: Text(text),
-          trailing: const Icon(Icons.radio_button_unchecked),
-          onTap: null, // Day 10: implement answer selection + feedback
-        ),
+      final isSelected = selectedIndex == i;
+      final isCorrect = q.correctIndex == i;
+      return OptionTile(
+        text: text,
+        isSelected: isSelected,
+        isCorrect: isCorrect,
+        showFeedback: showFeedback,
+        onTap: () => onTapOption(i),
       );
     });
   }
