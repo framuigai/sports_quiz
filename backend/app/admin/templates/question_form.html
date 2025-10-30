@@ -28,10 +28,10 @@
 <form class="form card" method="post" action="{{ action_url }}">
   <div class="grid grid--2">
     <div class="form__row">
-      <label for="index">Index <span class="req">*</span></label>
-      <input id="index" name="index" type="number" min="0" required
-             value="{{ (question.index if question else 0) }}">
-      <small class="muted">Question order in the quiz (0-based).</small>
+      <label for="order">Order <span class="req">*</span></label>
+      <input id="order" name="order" type="number" min="0" required
+             value="{{ (question.order if question else 0) }}">
+      <small class="muted">Question order in the quiz (0-based). Formerly "index".</small>
     </div>
 
     <div class="form__row">

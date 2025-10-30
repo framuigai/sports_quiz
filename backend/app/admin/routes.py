@@ -11,10 +11,11 @@ from flask import (
     redirect,
     url_for,
     flash,
+    abort,
 )
 from google.cloud import firestore
 from werkzeug.exceptions import NotFound
-from google.cloud.firestore_v1 import FieldFilter
+from google.cloud.firestore_v1 import FieldFilter, SERVER_TIMESTAMP
 from app.firebase_client import get_db
 from app.settings import ADMIN_SECRET
 
@@ -59,10 +60,10 @@ def _build_base_query(
     if not include_unapproved:
         q = q.where(filter=FieldFilter("is_approved", "==", True))
     if not include_deleted:
-        q = q.where(filter=FieldFilter("deleted", "==", 0))
-    q = q.order_by("created_at", direction=firestore.Query.DESCENDING)
+        q = q.where(filter=FieldFilter("deleted", "==", False))
+    # Order by updated_at DESC to mirror mobile
+    q = q.order_by("updated_at", direction=firestore.Query.DESCENDING)
     return q
-
 
 
 def _admin_guard_ok(req: request) -> bool:
@@ -81,8 +82,8 @@ def _admin_guard_ok(req: request) -> bool:
 def _enforce_admin_guard():
     # Only guard the /admin area; skip static, etc.
     if not _admin_guard_ok(request):
-        flash("Unauthorized: missing or invalid admin secret.", "error")
-        return redirect(url_for("admin.dashboard"))
+        # Avoid redirect loops — return 403 directly
+        abort(403)
 
 
 # -----------------------------
@@ -117,8 +118,8 @@ def quizzes():
         for snap in query.stream():
             data = snap.to_dict() or {}
             data["id"] = snap.id
-            # Firestore returns bools/ints as-is; ensure defaults exist for template
-            data.setdefault("deleted", 0)
+            # Ensure defaults exist for template
+            data.setdefault("deleted", False)
             data.setdefault("available_to_all", False)
             data.setdefault("is_approved", False)
             data.setdefault("difficulty", "easy")
@@ -163,7 +164,6 @@ def create_quiz():
             flash("Title is required.", "error")
             return redirect(url_for("admin.create_quiz"))
 
-        now = _now()
         doc = {
             "title": title,
             "description": description,
@@ -171,9 +171,12 @@ def create_quiz():
             "is_admin_quiz": True,
             "available_to_all": bool(available_to_all),
             "is_approved": bool(is_approved),
-            "deleted": 0,
-            "created_at": now,
-            "updated_at": now,
+            "deleted": False,
+            "created_at": SERVER_TIMESTAMP,
+            "updated_at": SERVER_TIMESTAMP,
+            # Optional denormalized fields you might add later:
+            # "version": 1,
+            # "num_questions": 0,
         }
 
         _db().collection("quizzes").add(doc)
@@ -194,16 +197,20 @@ def quiz_detail(doc_id: str):
         raise NotFound("Quiz not found")
     quiz = snap.to_dict() or {}
     quiz["id"] = snap.id
-    quiz.setdefault("deleted", 0)
+    quiz.setdefault("deleted", False)
     quiz.setdefault("available_to_all", False)
     quiz.setdefault("is_approved", False)
     quiz.setdefault("difficulty", "easy")
 
-    # 🧩 NEW: compute questions_count from subcollection
+    # Compute questions_count (active & not deleted)
     try:
-        # For dev-scale it’s fine to stream and count. For big data, switch to count() aggregate.
+        q = (
+            _question_collection(doc_id)
+            .where(filter=FieldFilter("deleted", "==", False))
+            .where(filter=FieldFilter("active", "==", True))
+        )
         count = 0
-        for _ in _question_collection(doc_id).stream():
+        for _ in q.stream():
             count += 1
         questions_count = count
     except Exception as e:
@@ -227,7 +234,8 @@ def toggle_available(doc_id: str):
                 raise NotFound("Quiz not found")
             data = snap.to_dict() or {}
             current = bool(data.get("available_to_all", False))
-            tx.update(ref, {"available_to_all": not current, "updated_at": _now()})
+            tx.update(ref, {"available_to_all": not current, "updated_at": SERVER_TIMESTAMP})
+
         txn = _db().transaction()
         txn_op(txn)
         flash("Availability toggled.", "success")
@@ -237,12 +245,12 @@ def toggle_available(doc_id: str):
 
 
 # -----------------------------
-# Soft Delete / Restore (quiz-level; unchanged)
+# Soft Delete / Restore (quiz-level)
 # -----------------------------
 @admin_bp.route("/quizzes/<doc_id>/soft-delete", methods=["POST"])
 def soft_delete_quiz(doc_id: str):
     try:
-        _quiz_ref(doc_id).update({"deleted": 1, "updated_at": _now()})
+        _quiz_ref(doc_id).update({"deleted": True, "updated_at": SERVER_TIMESTAMP})
         flash("Quiz soft-deleted.", "success")
     except Exception as e:
         flash(f"Failed to soft-delete: {e}", "error")
@@ -252,7 +260,7 @@ def soft_delete_quiz(doc_id: str):
 @admin_bp.route("/quizzes/<doc_id>/restore", methods=["POST"])
 def restore_quiz(doc_id: str):
     try:
-        _quiz_ref(doc_id).update({"deleted": 0, "updated_at": _now()})
+        _quiz_ref(doc_id).update({"deleted": False, "updated_at": SERVER_TIMESTAMP})
         flash("Quiz restored.", "success")
     except Exception as e:
         flash(f"Failed to restore: {e}", "error")
@@ -260,9 +268,9 @@ def restore_quiz(doc_id: str):
 
 
 # =====================================================================
-#                           QUESTIONS CRUD (Day 9)
-#   Storage layout: quizzes/{doc_id}/questions/{qid}
-#   NOTE: We are using HARD DELETE now. We can switch to soft-delete later.
+#                           QUESTIONS CRUD
+#   Storage: quizzes/{doc_id}/questions/{qid}
+#   Using "order" (not "index") + booleans + server timestamps
 # =====================================================================
 
 def _as_int(value: Any, fallback: int = 0) -> int:
@@ -276,7 +284,7 @@ def _as_int(value: Any, fallback: int = 0) -> int:
 
 def _split_4(texts: List[str]) -> List[str]:
     """Ensure exactly 4 trimmed strings; pad with empty if fewer; truncate if more."""
-    out = [ (t or "").strip() for t in texts ]
+    out = [(t or "").strip() for t in texts]
     if len(out) < 4:
         out += [""] * (4 - len(out))
     return out[:4]
@@ -286,7 +294,7 @@ def _validate_question_payload(form: Dict[str, Any]) -> Dict[str, Any]:
     """
     Validate and normalize question payload from form.
     Expected inputs:
-      - index (int >= 0)
+      - order (int >= 0)
       - text (non-empty)
       - options[0..3] (non-empty strings; exactly 4)
       - correct_index (0..3)
@@ -294,7 +302,7 @@ def _validate_question_payload(form: Dict[str, Any]) -> Dict[str, Any]:
     Returns a dict ready to write to Firestore.
     Raises ValueError with readable messages if invalid.
     """
-    idx_raw = form.get("index", "").strip()
+    order_raw = (form.get("order") or form.get("index") or "").strip()
     text = (form.get("text") or "").strip()
     opt0 = (form.get("options_0") or "").strip()
     opt1 = (form.get("options_1") or "").strip()
@@ -306,9 +314,9 @@ def _validate_question_payload(form: Dict[str, Any]) -> Dict[str, Any]:
     if not text:
         raise ValueError("Question text is required.")
 
-    index = _as_int(idx_raw, fallback=-1)
-    if index < 0:
-        raise ValueError("Index must be a non-negative integer.")
+    order = _as_int(order_raw, fallback=-1)
+    if order < 0:
+        raise ValueError("Order must be a non-negative integer.")
 
     options = _split_4([opt0, opt1, opt2, opt3])
     if any(o == "" for o in options):
@@ -318,44 +326,55 @@ def _validate_question_payload(form: Dict[str, Any]) -> Dict[str, Any]:
     if correct_index not in (0, 1, 2, 3):
         raise ValueError("correct_index must be one of 0, 1, 2, 3.")
 
-    now = _now()
     return {
-        "index": index,
+        "order": order,
         "text": text,
         "options": options,           # stored as array in Firestore
         "correct_index": correct_index,
         "image_url": image_url,
-        "deleted": 0,                 # reserved for soft-delete later
-        "created_at": now,
-        "updated_at": now,
+        "active": True,
+        "deleted": False,
+        # timestamps set by caller; created_at on create, updated_at always
     }
 
 
 @admin_bp.route("/quizzes/<doc_id>/questions")
 def questions_list(doc_id: str):
     """
-    List all questions for a quiz ordered by index.
+    List all questions for a quiz ordered by order (fallback: index).
     """
     # Ensure quiz exists
     quiz_snap = _quiz_ref(doc_id).get()
     if not quiz_snap.exists:
         raise NotFound("Quiz not found")
 
-    # Fetch questions
     items: List[Dict[str, Any]] = []
     try:
-        q = _question_collection(doc_id).order_by("index")
+        # Prefer 'order'; if missing index, Firestore will still return docs but not sorted by it.
+        q = _question_collection(doc_id).order_by("order")
         for snap in q.stream():
             data = snap.to_dict() or {}
             data["id"] = snap.id
             # defaults for template resilience
             data.setdefault("image_url", "")
             data.setdefault("correct_index", 0)
-            data.setdefault("index", 0)
+            data.setdefault("order", data.get("index", 0))
             data.setdefault("updated_at", 0)
             items.append(data)
-    except Exception as e:
-        flash(f"Failed to load questions: {e}", "error")
+    except Exception:
+        # Fallback: try legacy "index"
+        try:
+            q = _question_collection(doc_id).order_by("index")
+            for snap in q.stream():
+                data = snap.to_dict() or {}
+                data["id"] = snap.id
+                data.setdefault("image_url", "")
+                data.setdefault("correct_index", 0)
+                data.setdefault("order", data.get("index", 0))
+                data.setdefault("updated_at", 0)
+                items.append(data)
+        except Exception as e:
+            flash(f"Failed to load questions: {e}", "error")
 
     # For header/meta
     quiz = quiz_snap.to_dict() or {}
@@ -364,7 +383,7 @@ def questions_list(doc_id: str):
     quiz.setdefault("difficulty", "easy")
 
     return render_template(
-        "questions.html",  # will be created next step
+        "questions.html",
         quiz=quiz,
         items=items,
     )
@@ -386,7 +405,7 @@ def question_new(doc_id: str):
     if request.method == "GET":
         # Render empty form
         return render_template(
-            "question_form.html",     # will be created next step
+            "question_form.html",
             quiz=quiz,
             question=None,
             mode="create",
@@ -395,8 +414,26 @@ def question_new(doc_id: str):
     # POST - validate and insert
     try:
         payload = _validate_question_payload(request.form)
-        # created_at already set in payload; for create it’s fine
+        payload["created_at"] = SERVER_TIMESTAMP
+        payload["updated_at"] = SERVER_TIMESTAMP
         _question_collection(doc_id).add(payload)
+
+        # Optional: update denormalized num_questions
+        try:
+            q = (
+                _question_collection(doc_id)
+                .where(filter=FieldFilter("deleted", "==", False))
+                .where(filter=FieldFilter("active", "==", True))
+            )
+            cnt = 0
+            for _ in q.stream():
+                cnt += 1
+            _quiz_ref(doc_id).update(
+                {"num_questions": cnt, "updated_at": SERVER_TIMESTAMP}
+            )
+        except Exception:
+            pass
+
         flash("Question created.", "success")
         return redirect(url_for("admin.questions_list", doc_id=doc_id))
     except ValueError as ve:
@@ -429,13 +466,13 @@ def question_edit(doc_id: str, qid: str):
         question = qsnap.to_dict() or {}
         question["id"] = qid
         # Normalize for template fields
-        question.setdefault("index", 0)
+        question.setdefault("order", question.get("index", 0))
         question.setdefault("text", "")
         question.setdefault("options", ["", "", "", ""])
         question.setdefault("correct_index", 0)
         question.setdefault("image_url", "")
         return render_template(
-            "question_form.html",     # will be created next step
+            "question_form.html",
             quiz=quiz,
             question=question,
             mode="edit",
@@ -444,12 +481,29 @@ def question_edit(doc_id: str, qid: str):
     # POST - validate and update
     try:
         payload = _validate_question_payload(request.form)
-        # Ensure created_at preserved
+        # Ensure created_at preserved; set server updated_at
         existing = qsnap.to_dict() or {}
-        created_at = existing.get("created_at", _now())
+        created_at = existing.get("created_at", SERVER_TIMESTAMP)
         payload["created_at"] = created_at
-        payload["updated_at"] = _now()
+        payload["updated_at"] = SERVER_TIMESTAMP
         qref.set(payload, merge=False)
+
+        # Optional: update denormalized num_questions
+        try:
+            q = (
+                _question_collection(doc_id)
+                .where(filter=FieldFilter("deleted", "==", False))
+                .where(filter=FieldFilter("active", "==", True))
+            )
+            cnt = 0
+            for _ in q.stream():
+                cnt += 1
+            _quiz_ref(doc_id).update(
+                {"num_questions": cnt, "updated_at": SERVER_TIMESTAMP}
+            )
+        except Exception:
+            pass
+
         flash("Question updated.", "success")
         return redirect(url_for("admin.questions_list", doc_id=doc_id))
     except ValueError as ve:
@@ -464,10 +518,27 @@ def question_edit(doc_id: str, qid: str):
 def question_delete(doc_id: str, qid: str):
     """
     HARD delete a question (current approach).
-    NOTE: We can switch this to soft-delete later by updating a 'deleted' flag.
+    NOTE: Switching to soft-delete later: set deleted=True, updated_at=SERVER_TIMESTAMP
     """
     try:
         _question_collection(doc_id).document(qid).delete()
+
+        # Optional: update denormalized num_questions
+        try:
+            q = (
+                _question_collection(doc_id)
+                .where(filter=FieldFilter("deleted", "==", False))
+                .where(filter=FieldFilter("active", "==", True))
+            )
+            cnt = 0
+            for _ in q.stream():
+                cnt += 1
+            _quiz_ref(doc_id).update(
+                {"num_questions": cnt, "updated_at": SERVER_TIMESTAMP}
+            )
+        except Exception:
+            pass
+
         flash("Question deleted.", "success")
     except Exception as e:
         flash(f"Failed to delete question: {e}", "error")
