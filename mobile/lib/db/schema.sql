@@ -66,9 +66,11 @@ CREATE TABLE IF NOT EXISTS user_quiz_tags (
 CREATE INDEX IF NOT EXISTS idx_user_quiz_tag_name ON user_quiz_tags(tag_name);
 
 -- USER QUESTIONS (local only)
+-- Keep both "order" (preferred) and legacy "index" for compatibility.
 CREATE TABLE IF NOT EXISTS user_questions (
   question_id TEXT PRIMARY KEY,
   quiz_id TEXT NOT NULL,
+  "order" INTEGER,
   "index" INTEGER,
   text TEXT,
   options TEXT,
@@ -98,9 +100,11 @@ CREATE TABLE IF NOT EXISTS cache_admin_quizzes (
 );
 
 -- CACHE ADMIN QUESTIONS
+-- Keep both "order" (preferred) and legacy "index" for compatibility.
 CREATE TABLE IF NOT EXISTS cache_admin_questions (
   question_id TEXT PRIMARY KEY,
   quiz_id TEXT,
+  "order" INTEGER,
   "index" INTEGER,
   text TEXT,
   options TEXT,
@@ -110,35 +114,29 @@ CREATE TABLE IF NOT EXISTS cache_admin_questions (
   updated_at TEXT
 );
 
--- ATTEMPTS (local only)
+-- ATTEMPTS (runtime shape)
 CREATE TABLE IF NOT EXISTS attempts (
-  attempt_id TEXT PRIMARY KEY,
-  quiz_id TEXT,
-  user_id TEXT,
-  score REAL,
-  num_correct INTEGER,
-  num_questions INTEGER,
-  started_at TEXT,
-  completed_at TEXT,
-  deleted INTEGER,
-  deleted_at TEXT,
-  created_at TEXT,
-  updated_at TEXT,
-  FOREIGN KEY (user_id) REFERENCES users(uid) ON DELETE CASCADE
+  attempt_id   TEXT PRIMARY KEY,
+  quiz_id      TEXT NOT NULL,
+  quiz_title   TEXT NOT NULL,
+  difficulty   TEXT NOT NULL,
+  started_at   TEXT NOT NULL,
+  completed_at TEXT NOT NULL,
+  score        INTEGER NOT NULL,
+  num_correct  INTEGER NOT NULL,
+  num_total    INTEGER NOT NULL
 );
 
--- ANSWERS (local only)
-CREATE TABLE IF NOT EXISTS answers (
-  answer_id TEXT PRIMARY KEY,
-  attempt_id TEXT,
-  question_id TEXT,
-  selected_index INTEGER,
-  is_correct INTEGER,
-  answered_at TEXT,
-  deleted INTEGER,
-  deleted_at TEXT,
-  created_at TEXT,
-  updated_at TEXT,
+-- ATTEMPT ANSWERS (runtime shape)
+CREATE TABLE IF NOT EXISTS attempt_answers (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  attempt_id     TEXT NOT NULL,
+  question_id    TEXT NOT NULL,
+  q_index        INTEGER NOT NULL,
+  selected_index INTEGER NOT NULL,
+  correct_index  INTEGER NOT NULL,
+  is_correct     INTEGER NOT NULL,
+  elapsed_ms     INTEGER NULL,
   FOREIGN KEY (attempt_id) REFERENCES attempts(attempt_id) ON DELETE CASCADE
 );
 

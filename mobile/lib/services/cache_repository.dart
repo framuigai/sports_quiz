@@ -41,7 +41,7 @@ class CacheRepository {
   }
 
   // -------------------------
-  // 🧩 QUESTIONS (new for Player)
+  // QUESTIONS (Player cache)
   // -------------------------
   static Future<void> saveAdminQuestions(List<Map<String, dynamic>> questions) async {
     final batch = SQLiteService.db.batch();
@@ -60,12 +60,13 @@ class CacheRepository {
       'cache_admin_questions',
       where: 'quiz_id = ?',
       whereArgs: [quizId],
-      orderBy: 'index ASC',
+      // Prefer "order", fallback to legacy "index"
+      orderBy: 'COALESCE("order","index") ASC',
     );
   }
 
   // -------------------------
-  // 📝 ATTEMPTS (Day 11)
+  // ATTEMPTS (Day 11+)
   // -------------------------
 
   /// Inserts a completed attempt into the `attempts` table.
@@ -117,9 +118,6 @@ class CacheRepository {
     }
     await batch.commit(noResult: true);
   }
-
-  // Optional: later we can add history reads like:
-  // static Future<List<Map<String, dynamic>>> getAttemptsByQuiz(String quizId) async { ... }
 
   // --- helpers ---
   static String _pseudoUuid(String prefix) {

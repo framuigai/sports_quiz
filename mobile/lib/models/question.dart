@@ -6,7 +6,7 @@
 // Cache fields:
 //  - question_id (string)   => id
 //  - quiz_id (string)       => quizId
-//  - index (int)            => index (question order)
+//  - order/index (int)      => index (we expose as 'index' for UI compatibility)
 //  - text (string)
 //  - options (string)       => "A|B|C|D" (we store as List<String> in memory)
 //  - correct_index (int)
@@ -16,7 +16,7 @@
 class Question {
   final String id;
   final String quizId;
-  final int index;
+  final int index; // still named 'index' in Dart for UI compatibility
   final String text;
   final List<String> options;
   final int correctIndex;
@@ -37,10 +37,11 @@ class Question {
   });
 
   factory Question.fromCacheMap(Map<String, dynamic> m) {
+    final orderOrIndex = _asInt(m['order'] ?? m['index'], fallback: 0);
     return Question(
       id: (m['question_id'] ?? m['id'] ?? '').toString(),
       quizId: (m['quiz_id'] ?? '').toString(),
-      index: _asInt(m['index'], fallback: 0),
+      index: orderOrIndex,
       text: (m['text'] ?? '').toString(),
       options: _splitOptions(m['options']),
       correctIndex: _asInt(m['correct_index'], fallback: 0),
@@ -54,6 +55,8 @@ class Question {
     return {
       'question_id': id,
       'quiz_id': quizId,
+      // Write both fields for compatibility
+      'order': index,
       'index': index,
       'text': text,
       'options': options.join('|'),
