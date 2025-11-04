@@ -124,8 +124,8 @@ class FirebaseService {
         parameters: {
           'quiz_id': quizId,
           'question_id': questionId,
-          'is_correct': isCorrect,
-          'selected_index': selectedIndex,
+          'is_correct_i': isCorrect ? 1:0,
+          'selected_index_i': selectedIndex,
         },
       );
     } catch (e) {
@@ -202,7 +202,9 @@ class FirebaseService {
     final out = <String, Object>{};
     src.forEach((key, value) {
       if (value == null) return;
-      if (value is num || value is String || value is bool) {
+      if (value is bool) {
+        out[key] = value ? 1 : 0;        // <-- convert bools to ints
+      } else if (value is num || value is String) {
         out[key] = value;
       } else {
         out[key] = value.toString();
