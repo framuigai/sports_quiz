@@ -57,6 +57,30 @@ body{
 .cap{text-transform:capitalize}
 .req{color:#ffdd8a}
 
+/* --- Added utilities used in templates --- */
+.small{font-size:0.875rem}
+.mt-4{margin-top:4px}
+.mt-8{margin-top:8px}
+.mt-12{margin-top:12px}
+.mt-16{margin-top:16px}
+.sep{display:inline-block;margin:0 8px;color:var(--muted)}
+.badge{
+  display:inline-block;
+  min-width:28px;
+  padding:2px 8px;
+  border-radius:999px;
+  background:rgba(255,255,255,0.1);
+  border:1px solid var(--border);
+  text-align:center;
+  font-weight:600;
+}
+
+/* Ordered list: A, B, C... used for options */
+.list--alpha{list-style: lower-alpha; padding-left: 18px}
+.list--bullets{list-style: disc; padding-left: 18px}
+.compact > li{margin:2px 0}
+/* ---------------------------------------- */
+
 .page-header{display:flex;justify-content:space-between;align-items:center;margin:18px 0 12px}
 .actions{display:flex;gap:10px}
 .actions--stack{display:flex;flex-direction:column;gap:10px}

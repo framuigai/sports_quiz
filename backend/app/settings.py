@@ -1,3 +1,4 @@
+# backend/app/settings.py
 from __future__ import annotations
 
 import os
@@ -19,3 +20,6 @@ SECRET_KEY = os.getenv("SECRET_KEY", "").strip() or None
 #   Header: X-Admin-Secret: <value>
 #   OR query param: ?admin_secret=<value>
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "").strip() or None
+
+# === Gemini / Generative AI ===
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip() or None
