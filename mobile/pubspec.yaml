@@ -1,4 +1,3 @@
-# pubspec.yaml
 name: sports_quiz
 description: MVP Football Quiz app (Flutter)
 publish_to: "none"
@@ -19,6 +18,9 @@ dependencies:
   # Local storage / utils
   sqflite: ^2.4.0
   path: ^1.9.0
+
+  # HTTP client for backend calls
+  http: ^1.2.2
 
   cupertino_icons: ^1.0.8
 

@@ -70,9 +70,6 @@ class _HomeTabsPageState extends State<HomeTabsPage>
     // If user chose to go to My Quizzes, switch tab and ping a refresh via an inherited lookup.
     if (shouldRefreshMy == true) {
       _tab.index = 1; // My Quizzes tab
-      // A naive technique to notify MyQuizzes tab to refresh:
-      // Pop and rebuild by replacing the route, or use a GlobalKey. Here we just
-      // rebuild by calling setState; MyQuizzesTab does a pull-to-refresh anyway.
       setState(() {});
     }
   }
@@ -198,6 +195,7 @@ class _AdminQuizzesTabState extends State<_AdminQuizzesTab> {
                     quizId: q['quiz_id']?.toString() ?? '',
                     title: q['title']?.toString() ?? 'Untitled Quiz',
                     difficulty: q['difficulty']?.toString() ?? 'medium',
+                    isAdmin: true, // ✅ important
                   ),
                 ),
               );
@@ -289,6 +287,7 @@ class _MyQuizzesTabState extends State<_MyQuizzesTab> {
                     quizId: id,
                     title: q['title']?.toString() ?? 'Untitled Quiz',
                     difficulty: q['difficulty']?.toString() ?? 'medium',
+                    isAdmin: false, // ✅ important
                   ),
                 ),
               );
