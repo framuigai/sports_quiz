@@ -10,7 +10,7 @@
       <strong>{{ quiz.title }}</strong> &middot;
       Difficulty: <span class="cap">{{ quiz.difficulty|default('easy') }}</span>
       <span class="sep">|</span>
-      Ordered by <code>index</code> (ascending)
+      Ordered by <code>order</code> (ascending)
     </p>
   </div>
   <div class="actions">
@@ -24,7 +24,7 @@
     <table class="table">
       <thead>
         <tr>
-          <th style="width: 80px;">Index</th>
+          <th style="width: 80px;">Order</th>
           <th>Text</th>
           <th>Options</th>
           <th style="width: 120px;">Correct</th>
@@ -36,7 +36,9 @@
         {% if items and items|length > 0 %}
           {% for q in items %}
           <tr>
-            <td><code>{{ q.index|default(0) }}</code></td>
+            <td>
+              <code>{{ q.order if q.order is defined else (q.index if q.index is defined else 0) }}</code>
+            </td>
             <td>
               {% set txt = q.text|default('—') %}
               {% if txt|length > 120 %}
@@ -68,8 +70,8 @@
             <td class="ta-right">
               <div class="actions actions--inline">
                 <a class="btn btn--small" href="{{ url_for('admin.question_edit', doc_id=quiz.id, qid=q.id) }}">Edit</a>
-                <form method="post" action="{{ url_for('admin.question_delete', doc_id=quiz.id, qid=q.id) }}" onsubmit="return confirm('Permanently delete this question? This cannot be undone.');">
-                  <button class="btn btn--small btn--danger" type="submit">Delete</button>
+                <form method="post" action="{{ url_for('admin.question_delete', doc_id=quiz.id, qid=q.id) }}">
+                  <button class="btn btn--small btn--danger" type="submit" data-confirm="Permanently delete this question? This cannot be undone.">Delete</button>
                 </form>
               </div>
             </td>
@@ -88,9 +90,9 @@
 <div class="muted small mt-8">
   <p><strong>Tips</strong></p>
   <ul class="list--bullets compact">
-    <li>Use consecutive <code>index</code> values (0, 1, 2, …) for predictable order in the mobile player.</li>
-    <li>We’re doing <strong>hard delete</strong> for now; we can switch to soft-delete later.</li>
-    <li>If Firestore prompts for a composite index after adding filters/order, follow the link to auto-create it.</li>
+    <li>Use consecutive <code>order</code> values (0, 1, 2, …) for correct ordering in the app.</li>
+    <li>Currently using <strong>hard delete</strong>. We can add soft-delete later.</li>
+    <li>If Firestore asks for an index, follow its link once.</li>
   </ul>
 </div>
 {% endblock %}
