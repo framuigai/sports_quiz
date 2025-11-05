@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Tuple
+import random
 
 import google.generativeai as genai
 from pydantic import ValidationError
@@ -51,24 +51,60 @@ def init_genai():
     if not GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY is not set")
     genai.configure(api_key=GEMINI_API_KEY)
-    return genai.GenerativeModel("gemini-1.5-flash")
+    # Use system_instruction instead of a 'system' role in contents
+    return genai.GenerativeModel(
+        model_name="gemini-2.5-flash",
+        system_instruction=SYSTEM_PROMPT,
+    )
+
+
+def _shuffle_question_options_inplace(q) -> None:
+    """
+    Shuffle q.options in-place and remap q.correct_index accordingly.
+    """
+    # Pair original indices with option strings
+    indexed_opts = list(enumerate(list(q.options)))
+    random.shuffle(indexed_opts)
+    # Build new options list
+    q.options = [opt for _, opt in indexed_opts]
+    # Find where the original correct index landed
+    for new_idx, (old_idx, _) in enumerate(indexed_opts):
+        if old_idx == q.correct_index:
+            q.correct_index = new_idx
+            break
+
+
+def _postprocess_quiz(quiz_in: QuizIn) -> QuizIn:
+    """
+    Normalize order and randomize answer positions to avoid all 'A' correct.
+    """
+    # Ensure perfect 0..N-1 order
+    for i, q in enumerate(quiz_in.questions):
+        q.order = i
+
+    # Always shuffle options to spread correct answers across A/B/C/D
+    # (You could make this conditional if you prefer.)
+    for q in quiz_in.questions:
+        _shuffle_question_options_inplace(q)
+
+    return quiz_in
 
 
 def generate_quiz_payload(topic: str, difficulty: str, num_questions: int) -> QuizIn:
     model = init_genai()
-    contents = [
-        {"role": "system", "parts": [SYSTEM_PROMPT]},
-        {"role": "user", "parts": [_build_user_prompt(topic, difficulty, num_questions)]},
-    ]
-    resp = model.generate_content(contents)
+
+    # With system_instruction set on the model, pass the user prompt directly.
+    resp = model.generate_content(_build_user_prompt(topic, difficulty, num_questions))
     if resp is None or resp.text is None:
         raise RuntimeError("Empty response from Gemini")
 
-    # Some SDKs wrap JSON in ``` blocks; be resilient
     raw = resp.text.strip()
+
+    # Some SDKs/models occasionally wrap JSON in ``` blocks; be resilient.
     if raw.startswith("```"):
+        # remove leading & trailing backticks
         raw = raw.strip("`")
-        # remove possible "json" header
+        # remove optional leading 'json'
         if raw.lower().startswith("json"):
             raw = raw[4:].strip()
 
@@ -82,8 +118,6 @@ def generate_quiz_payload(topic: str, difficulty: str, num_questions: int) -> Qu
     except ValidationError as ve:
         raise RuntimeError(f"JSON failed schema validation: {ve}")
 
-    # Normalize orders if model didn't give perfect sequence
-    for i, q in enumerate(quiz_in.questions):
-        q.order = i
-
+    # Normalize & shuffle options so correct answers aren't always A
+    quiz_in = _postprocess_quiz(quiz_in)
     return quiz_in

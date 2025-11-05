@@ -1,1 +1,1 @@
-# Flask Backend – Sports Quiz MVP (v2)
+# Flask Backend – Sports Quiz MVP
