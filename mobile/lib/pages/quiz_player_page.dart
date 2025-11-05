@@ -1,4 +1,3 @@
-// mobile/lib/pages/quiz_player_page.dart
 //
 // Quiz Player with play loop (Day 10):
 //  - Accepts quizId, title, difficulty via constructor
@@ -27,11 +26,15 @@ class QuizPlayerPage extends StatefulWidget {
   final String title;
   final String difficulty;
 
+  /// 🆕 Whether this quiz is from the Admin/Global list or the user's private list.
+  final bool isAdmin;
+
   const QuizPlayerPage({
     super.key,
     required this.quizId,
     required this.title,
     required this.difficulty,
+    required this.isAdmin,
   });
 
   @override
@@ -45,7 +48,6 @@ class _QuizPlayerPageState extends State<QuizPlayerPage> {
   int _currentIndex = 0;
   bool _loggedStarted = false;
 
-  // Day 10 state:
   int? _selectedIndex;     // index selected for current question
   bool _showFeedback = false;
   final List<AnswerRecord> _answers = [];
@@ -65,10 +67,16 @@ class _QuizPlayerPageState extends State<QuizPlayerPage> {
     });
 
     // 1) Try to fetch from server (best effort)
-    final outcome = await FirestoreService.fetchQuestionsByQuizId(widget.quizId);
+    final outcome = await FirestoreService.fetchQuestionsByQuizId(
+      widget.quizId,
+      isAdmin: widget.isAdmin,
+    );
 
-    // 2) Always read from cache
-    final raw = await CacheRepository.getQuestionsByQuizId(widget.quizId);
+    // 2) Always read from cache (choose the right table)
+    final raw = widget.isAdmin
+        ? await CacheRepository.getAdminQuestionsByQuizId(widget.quizId)
+        : await CacheRepository.getUserQuestionsByQuizId(widget.quizId);
+
     final parsed = raw.map((m) => Question.fromCacheMap(m)).toList();
 
     if (!mounted) return;

@@ -1,11 +1,10 @@
-// lib/services/cache_repository.dart
 import 'dart:math';
 import 'package:sqflite/sqflite.dart';
 import 'sqlite_service.dart';
 
 class CacheRepository {
   // -------------------------
-  // QUIZZES
+  // QUIZZES (ADMIN/GLOBAL)
   // -------------------------
   static Future<void> saveAdminQuiz(Map<String, dynamic> quiz) async {
     await SQLiteService.db.insert(
@@ -41,7 +40,7 @@ class CacheRepository {
   }
 
   // -------------------------
-  // QUESTIONS (Player cache)
+  // QUESTIONS (ADMIN/GLOBAL)
   // -------------------------
   static Future<void> saveAdminQuestions(List<Map<String, dynamic>> questions) async {
     final batch = SQLiteService.db.batch();
@@ -55,7 +54,7 @@ class CacheRepository {
     await batch.commit(noResult: true);
   }
 
-  static Future<List<Map<String, dynamic>>> getQuestionsByQuizId(String quizId) async {
+  static Future<List<Map<String, dynamic>>> getAdminQuestionsByQuizId(String quizId) async {
     return SQLiteService.db.query(
       'cache_admin_questions',
       where: 'quiz_id = ?',
@@ -66,7 +65,51 @@ class CacheRepository {
   }
 
   // -------------------------
-  // ATTEMPTS (Day 11+)
+  // 🆕 QUIZZES (USER / MY QUIZZES)
+  // -------------------------
+  static Future<void> saveUserQuiz(Map<String, dynamic> quiz) async {
+    await SQLiteService.db.insert(
+      'user_quizzes',
+      quiz,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  static Future<List<Map<String, dynamic>>> getMyQuizzes(String ownerId) async {
+    return SQLiteService.db.query(
+      'user_quizzes',
+      where: 'owner_id = ? AND (deleted IS NULL OR deleted = 0)',
+      whereArgs: [ownerId],
+      orderBy: 'updated_at DESC',
+    );
+  }
+
+  // -------------------------
+  // 🆕 QUESTIONS (USER / MY QUIZZES)
+  // -------------------------
+  static Future<void> saveUserQuestions(List<Map<String, dynamic>> questions) async {
+    final batch = SQLiteService.db.batch();
+    for (final q in questions) {
+      batch.insert(
+        'user_questions',
+        q,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  static Future<List<Map<String, dynamic>>> getUserQuestionsByQuizId(String quizId) async {
+    return SQLiteService.db.query(
+      'user_questions',
+      where: 'quiz_id = ?',
+      whereArgs: [quizId],
+      orderBy: 'COALESCE("order","index") ASC',
+    );
+  }
+
+  // -------------------------
+  // ATTEMPTS (runtime shape)
   // -------------------------
 
   /// Inserts a completed attempt into the `attempts` table.

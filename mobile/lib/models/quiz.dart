@@ -1,5 +1,4 @@
-// mobile/lib/models/quiz.dart
-//
+//lib/models/quiz.dart
 // Domain model for a Quiz used by UI and services.
 // Maps cleanly to our cache_admin_quizzes table and Firestore docs.
 //
@@ -13,8 +12,12 @@
 //  - available_to_all (int 0/1) => availableToAll (bool)
 //  - is_approved (int 0/1) => isApproved (bool)
 //  - deleted (int 0/1) => deleted (bool)
+//  - owner_id (string) => ownerId (user's private quizzes)
+//  - source (string)   => e.g., "ai", "manual"
+//  - num_questions (int) => optional
 //  - created_at / updated_at (string; iso8601 or epoch-as-string)
-//    We keep them as String for now since the cache stores strings.
+//
+// NOTE: We keep strings for created/updated to match local cache.
 
 class Quiz {
   final String id;
@@ -29,6 +32,11 @@ class Quiz {
   final String createdAt; // stored as string to align with cache
   final String updatedAt; // stored as string to align with cache
 
+  // 🆕 user/private quiz-specific
+  final String ownerId;     // empty for admin/global
+  final String source;      // "ai"/"manual"/"import"
+  final int? numQuestions;  // optional
+
   const Quiz({
     required this.id,
     required this.title,
@@ -41,6 +49,9 @@ class Quiz {
     required this.deleted,
     required this.createdAt,
     required this.updatedAt,
+    this.ownerId = '',
+    this.source = '',
+    this.numQuestions,
   });
 
   factory Quiz.fromCacheMap(Map<String, dynamic> m) {
@@ -56,6 +67,9 @@ class Quiz {
       deleted: _asBool(m['deleted']),
       createdAt: (m['created_at'] ?? '').toString(),
       updatedAt: (m['updated_at'] ?? '').toString(),
+      ownerId: (m['owner_id'] ?? '').toString(),
+      source: (m['source'] ?? '').toString(),
+      numQuestions: _asNullableInt(m['num_questions']),
     );
   }
 
@@ -72,6 +86,9 @@ class Quiz {
       'deleted': deleted ? 1 : 0,
       'created_at': createdAt,
       'updated_at': updatedAt,
+      'owner_id': ownerId,
+      'source': source,
+      if (numQuestions != null) 'num_questions': numQuestions,
     };
   }
 
@@ -89,5 +106,13 @@ class Quiz {
     if (v is num) return v != 0;
     final s = v?.toString().toLowerCase() ?? 'false';
     return s == 'true' || s == '1';
+  }
+
+  static int? _asNullableInt(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v);
+    return null;
   }
 }
