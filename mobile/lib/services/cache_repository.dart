@@ -7,9 +7,37 @@ class CacheRepository {
   // QUIZZES (ADMIN/GLOBAL)
   // -------------------------
   static Future<void> saveAdminQuiz(Map<String, dynamic> quiz) async {
+    // Some devices might still have an older DB without the newest columns.
+    // To avoid "no column named owner_id" errors, insert only known-safe columns.
+    const allowedColumns = {
+      'quiz_id',
+      'title',
+      'description',
+      'difficulty',
+      'tags',
+      'is_admin_quiz',
+      'available_to_all',
+      'is_approved',
+      'deleted',
+      'deleted_at',
+      'created_at',
+      'updated_at',
+      // The following may exist in newer schema; include if present but ignore if not.
+      'owner_id',
+      'source',
+      'num_questions',
+    };
+
+    final filtered = <String, dynamic>{};
+    for (final entry in quiz.entries) {
+      if (allowedColumns.contains(entry.key)) {
+        filtered[entry.key] = entry.value;
+      }
+    }
+
     await SQLiteService.db.insert(
       'cache_admin_quizzes',
-      quiz,
+      filtered,
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
