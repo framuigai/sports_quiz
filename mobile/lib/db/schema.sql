@@ -96,7 +96,11 @@ CREATE TABLE IF NOT EXISTS cache_admin_quizzes (
   deleted INTEGER,
   deleted_at TEXT,
   created_at TEXT,
-  updated_at TEXT
+  updated_at TEXT,
+  -- ⬇️ New columns used by app code when mirroring Firestore
+  owner_id TEXT,
+  source TEXT,
+  num_questions INTEGER
 );
 
 -- CACHE ADMIN QUESTIONS

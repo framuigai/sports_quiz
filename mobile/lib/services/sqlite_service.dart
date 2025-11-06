@@ -16,13 +16,41 @@ class SQLiteService {
 
     _db = await openDatabase(
       path,
-      version: 1,
+      // ⬆️ bump version to trigger onUpgrade for new columns
+      version: 2,
       onConfigure: (db) async {
         // Ensure FKs are enforced for this connection.
         await db.execute('PRAGMA foreign_keys = ON;');
       },
       onCreate: (db, version) async {
         await _runSchema(db);
+        // Also ensure any late-added tables exist.
+        await _ensureMigrations(db);
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        // Lightweight migrations for existing installs.
+        if (oldVersion < 2) {
+          // Add new columns to cache_admin_quizzes that our code now writes.
+          // We wrap each ALTER in try/catch so re-running is safe.
+          try {
+            await db.execute(
+              'ALTER TABLE cache_admin_quizzes ADD COLUMN owner_id TEXT DEFAULT \'\'',
+            );
+          } catch (_) {}
+          try {
+            await db.execute(
+              'ALTER TABLE cache_admin_quizzes ADD COLUMN source TEXT',
+            );
+          } catch (_) {}
+          try {
+            await db.execute(
+              'ALTER TABLE cache_admin_quizzes ADD COLUMN num_questions INTEGER',
+            );
+          } catch (_) {}
+
+          // Ensure late-added tables also exist
+          await _ensureMigrations(db);
+        }
       },
       onOpen: (db) async {
         // Day 11: ensure attempts tables exist even if schema.sql wasn't updated yet

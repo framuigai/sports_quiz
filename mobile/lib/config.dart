@@ -14,5 +14,6 @@ class ApiConfig {
   }
 
   /// Default network timeout for API calls.
-  static const Duration timeout = Duration(seconds: 30);
+  /// Bumped to 600s to accommodate slower AI generation on dev.
+  static const Duration timeout = Duration(seconds: 600);
 }
