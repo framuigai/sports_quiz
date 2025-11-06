@@ -20,6 +20,22 @@ backend/.env
 __pycache__/
 *.pyc
 
-
 backend/credentials/
 
+# --- Added below ---
+
+# Python (more robust)
+**/__pycache__/
+**/*.py[cod]
+
+# Env files (root & variants)
+.env
+.env.*
+
+# Editors / IDEs
+.vscode/
+.idea/
+
+# OS junk
+.DS_Store
+Thumbs.db
