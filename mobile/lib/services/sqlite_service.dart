@@ -16,8 +16,8 @@ class SQLiteService {
 
     _db = await openDatabase(
       path,
-      // ⬆️ bump version to trigger onUpgrade for new columns
-      version: 2,
+      // ⬆️ bump version to trigger onUpgrade for new columns (order/index on question tables)
+      version: 3,
       onConfigure: (db) async {
         // Ensure FKs are enforced for this connection.
         await db.execute('PRAGMA foreign_keys = ON;');
@@ -29,12 +29,13 @@ class SQLiteService {
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         // Lightweight migrations for existing installs.
+
+        // v2: add columns to cache_admin_quizzes used by newer code.
         if (oldVersion < 2) {
-          // Add new columns to cache_admin_quizzes that our code now writes.
-          // We wrap each ALTER in try/catch so re-running is safe.
+          // Wrap each ALTER in try/catch so re-running is safe.
           try {
             await db.execute(
-              'ALTER TABLE cache_admin_quizzes ADD COLUMN owner_id TEXT DEFAULT \'\'',
+              "ALTER TABLE cache_admin_quizzes ADD COLUMN owner_id TEXT DEFAULT ''",
             );
           } catch (_) {}
           try {
@@ -51,9 +52,31 @@ class SQLiteService {
           // Ensure late-added tables also exist
           await _ensureMigrations(db);
         }
+
+        // ✅ v3: add missing "order"/"index" columns on question tables to align with schema & app code.
+        if (oldVersion < 3) {
+          // cache_admin_questions
+          try {
+            await db.execute('ALTER TABLE cache_admin_questions ADD COLUMN "order" INTEGER');
+          } catch (_) {}
+          try {
+            await db.execute('ALTER TABLE cache_admin_questions ADD COLUMN "index" INTEGER');
+          } catch (_) {}
+
+          // user_questions
+          try {
+            await db.execute('ALTER TABLE user_questions ADD COLUMN "order" INTEGER');
+          } catch (_) {}
+          try {
+            await db.execute('ALTER TABLE user_questions ADD COLUMN "index" INTEGER');
+          } catch (_) {}
+
+          // Ensure tables exist even if a very old install missed them
+          await _ensureMigrations(db);
+        }
       },
       onOpen: (db) async {
-        // Day 11: ensure attempts tables exist even if schema.sql wasn't updated yet
+        // Ensure tables created by late schema changes exist.
         await _ensureMigrations(db);
       },
     );
