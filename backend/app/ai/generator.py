@@ -11,9 +11,13 @@ from app.settings import GEMINI_API_KEY
 from .schema import QuizIn
 
 
-SYSTEM_PROMPT = """You are an assistant that generates multiple-choice sports quizzes.
-STRICTLY return JSON only (no markdown, no commentary).
-Schema:
+SYSTEM_PROMPT = """
+You are an assistant that generates multiple-choice sports quizzes.
+You MUST return output in STRICT JSON format. 
+Do NOT include any explanation, commentary, markdown code blocks, or extra text.
+
+The JSON MUST match this exact schema:
+
 {
   "title": "string",
   "description": "string",
@@ -28,15 +32,17 @@ Schema:
     }
   ]
 }
-Constraints:
-- Exactly 4 options per question.
-- correct_index must be 0..3 and match the correct option.
-- order is a 0-based integer that increases by 1 for each question.
-- Keep language simple, unambiguous, and suitable for a general audience.
-- Do not include explanations or extra fields.
-- Return JSON only.
-"""
 
+Rules:
+- EXACTLY 4 options per question.
+- correct_index MUST be 0, 1, 2, or 3.
+- correct_index MUST correctly match the right option.
+- "order" MUST be a zero-based integer increasing sequentially.
+- Do NOT wrap the JSON in backticks.
+- Do NOT write "Here is your JSON" or anything outside the JSON.
+
+Return ONLY the JSON object and nothing else.
+"""
 
 def _build_user_prompt(topic: str, difficulty: str, num_questions: int) -> str:
     return json.dumps({

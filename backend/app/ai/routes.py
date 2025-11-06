@@ -1,123 +1,127 @@
-# backend/app/ai/generator.py
+# backend/app/ai/routes.py
 from __future__ import annotations
 
-import json
-import random
+from typing import Any
 
-import google.generativeai as genai
-from pydantic import ValidationError
+from flask import Blueprint, jsonify, request
+from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 
-from app.settings import GEMINI_API_KEY
-from .schema import QuizIn
+from app.firebase_client import get_db
+from app.settings import ADMIN_SECRET
+from .generator import generate_quiz_payload
+from .schema import QuizWrite
+from app.ai.moderation import moderate_quiz
 
-
-SYSTEM_PROMPT = """You are an assistant that generates multiple-choice sports quizzes.
-STRICTLY return JSON only (no markdown, no commentary).
-Schema:
-{
-  "title": "string",
-  "description": "string",
-  "difficulty": "easy|medium|hard",
-  "questions": [
-    {
-      "order": 0,
-      "text": "string",
-      "options": ["string", "string", "string", "string"],
-      "correct_index": 0,
-      "image_url": "string or empty"
-    }
-  ]
-}
-Constraints:
-- Exactly 4 options per question.
-- correct_index must be 0..3 and match the correct option.
-- order is a 0-based integer that increases by 1 for each question.
-- Keep language simple, unambiguous, and suitable for a general audience.
-- Do not include explanations or extra fields.
-- Return JSON only.
-"""
+ai_bp = Blueprint("ai", __name__)
 
 
-def _build_user_prompt(topic: str, difficulty: str, num_questions: int) -> str:
-    return json.dumps({
-        "topic": topic,
-        "difficulty": difficulty,
-        "num_questions": max(1, min(20, int(num_questions))),
-        "notes": "Return strictly JSON matching the schema and constraints."
-    })
+def _bool(v: Any) -> bool:
+    return str(v).lower() in {"1", "true", "t", "yes"}
 
 
-def init_genai():
-    if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY is not set")
-    genai.configure(api_key=GEMINI_API_KEY)
-    # Use system_instruction instead of a 'system' role in contents
-    return genai.GenerativeModel(
-        model_name="gemini-2.5-flash",
-        system_instruction=SYSTEM_PROMPT,
-    )
-
-
-def _shuffle_question_options_inplace(q) -> None:
+def _admin_guard_ok(req) -> bool:
     """
-    Shuffle q.options in-place and remap q.correct_index accordingly.
+    Optional simple guard if you want to keep this endpoint private.
+    If ADMIN_SECRET is set, require X-Admin-Secret header or ?admin_secret=...
     """
-    # Pair original indices with option strings
-    indexed_opts = list(enumerate(list(q.options)))
-    random.shuffle(indexed_opts)
-    # Build new options list
-    q.options = [opt for _, opt in indexed_opts]
-    # Find where the original correct index landed
-    for new_idx, (old_idx, _) in enumerate(indexed_opts):
-        if old_idx == q.correct_index:
-            q.correct_index = new_idx
-            break
+    if not ADMIN_SECRET:
+        return True
+    provided = req.headers.get("X-Admin-Secret") or req.args.get("admin_secret")
+    return provided == ADMIN_SECRET
 
 
-def _postprocess_quiz(quiz_in: QuizIn) -> QuizIn:
-    """
-    Normalize order and randomize answer positions to avoid all 'A' correct.
-    """
-    # Ensure perfect 0..N-1 order
-    for i, q in enumerate(quiz_in.questions):
-        q.order = i
+@ai_bp.route("/generate_quiz", methods=["POST"])
+def generate_quiz():
+    if not _admin_guard_ok(request):
+        return jsonify({"error": "forbidden"}), 403
 
-    # Always shuffle options to spread correct answers across A/B/C/D
-    # (You could make this conditional if you prefer.)
-    for q in quiz_in.questions:
-        _shuffle_question_options_inplace(q)
+    payload = request.get_json(silent=True) or {}
+    topic = (payload.get("topic") or "").strip()
+    difficulty = (payload.get("difficulty") or "easy").strip().lower()
+    num_questions = int(payload.get("num_questions") or 10)
 
-    return quiz_in
+    # Flow control
+    # mode = "user" or "admin"
+    mode = (payload.get("mode") or "user").strip().lower()
+    owner_id = (payload.get("owner_id") or "").strip() or None
+    is_admin_mode = mode == "admin"
 
+    if not topic:
+        return jsonify({"error": "topic is required"}), 400
 
-def generate_quiz_payload(topic: str, difficulty: str, num_questions: int) -> QuizIn:
-    model = init_genai()
-
-    # With system_instruction set on the model, pass the user prompt directly.
-    resp = model.generate_content(_build_user_prompt(topic, difficulty, num_questions))
-    if resp is None or resp.text is None:
-        raise RuntimeError("Empty response from Gemini")
-
-    raw = resp.text.strip()
-
-    # Some SDKs/models occasionally wrap JSON in ``` blocks; be resilient.
-    if raw.startswith("```"):
-        # remove leading & trailing backticks
-        raw = raw.strip("`")
-        # remove optional leading 'json'
-        if raw.lower().startswith("json"):
-            raw = raw[4:].strip()
+    # For user mode we need an owner_id so mobile can fetch `owner_id == uid`
+    if not is_admin_mode and not owner_id:
+        return jsonify({"error": "owner_id is required when mode=='user'"}), 400
 
     try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"Model returned invalid JSON: {e}")
+        quiz_in = generate_quiz_payload(topic, difficulty, num_questions)
 
-    try:
-        quiz_in = QuizIn.model_validate(data)
-    except ValidationError as ve:
-        raise RuntimeError(f"JSON failed schema validation: {ve}")
+        # Basic moderation hook (can be extended)
+        ok, reasons = moderate_quiz(quiz_in.model_dump())
+        if not ok:
+            return jsonify({"error": "blocked_by_moderation", "reasons": reasons}), 400
 
-    # Normalize & shuffle options so correct answers aren't always A
-    quiz_in = _postprocess_quiz(quiz_in)
-    return quiz_in
+        db = get_db()
+
+        # Flags to align with mobile fetch logic:
+        # - Admin tab requires: is_admin_quiz==true, available_to_all==true, is_approved==true, deleted==false
+        # - My Quizzes uses owner_id == uid; available_to_all remains False; is_approved True
+        if is_admin_mode:
+            quiz_doc = QuizWrite(
+                title=quiz_in.title,
+                description=quiz_in.description or "",
+                difficulty=quiz_in.difficulty,
+                is_admin_quiz=True,
+                available_to_all=True,   # <-- ensure visible to Admin/Global tab
+                is_approved=True,        # <-- ensure passes mobile filter
+                deleted=False,
+                source="ai",
+                owner_id=None,
+                num_questions=len(quiz_in.questions),
+            ).model_dump()
+        else:
+            quiz_doc = QuizWrite(
+                title=quiz_in.title,
+                description=quiz_in.description or "",
+                difficulty=quiz_in.difficulty,
+                is_admin_quiz=False,
+                available_to_all=False,
+                is_approved=True,        # private user quizzes visible to owner immediately
+                deleted=False,
+                source="ai",
+                owner_id=owner_id,
+                num_questions=len(quiz_in.questions),
+            ).model_dump()
+
+        # Timestamps
+        quiz_doc["created_at"] = SERVER_TIMESTAMP
+        quiz_doc["updated_at"] = SERVER_TIMESTAMP
+
+        # Create quiz
+        quiz_ref = db.collection("quizzes").document()
+        quiz_ref.set(quiz_doc)
+
+        # Create questions
+        qcol = quiz_ref.collection("questions")
+        batch = db.batch()
+        for q in quiz_in.questions:
+            qdoc = {
+                "order": int(q.order),
+                "text": q.text,
+                "options": list(q.options),
+                "correct_index": int(q.correct_index),
+                "image_url": q.image_url or "",
+                "active": True,
+                "deleted": False,
+                "created_at": SERVER_TIMESTAMP,
+                "updated_at": SERVER_TIMESTAMP,
+            }
+            qref = qcol.document()
+            batch.set(qref, qdoc)
+
+        batch.commit()
+
+        return jsonify({"quiz_id": quiz_ref.id}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
