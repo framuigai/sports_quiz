@@ -5,6 +5,7 @@ import '../services/firestore_service.dart';
 import '../services/firebase_service.dart';
 import '../widgets/snackbar_helper.dart';
 import 'quiz_player_page.dart';
+import '../services/cache_repository.dart'; // for optional immediate local insert
 
 /// UI form to generate an AI quiz:
 ///  - Topic (text)
@@ -15,6 +16,7 @@ import 'quiz_player_page.dart';
 ///  2) FirestoreService.fetchQuizById(quiz_id)  -> caches quiz in user_quizzes
 ///  3) FirestoreService.fetchQuestionsByQuizId(quiz_id, isAdmin: false) -> caches questions
 ///  4) Offer to open immediately in the Player OR return to My Quizzes.
+///     (Both paths now pop this page with `true` so HomeTabsPage refreshes “My Quizzes”.)
 class GenerateQuizPage extends StatefulWidget {
   const GenerateQuizPage({super.key});
 
@@ -51,7 +53,7 @@ class _GenerateQuizPageState extends State<GenerateQuizPage> {
         'difficulty': _difficulty,
         'num_questions': _numQuestions,
         'mode': 'user',
-        if (uid.isNotEmpty) 'owner_id': uid, // backend may ignore, but harmless
+        if (uid.isNotEmpty) 'owner_id': uid, // harmless hint to backend
       };
 
       final resp = await HttpService.postJson('/ai/generate_quiz', payload);
@@ -61,53 +63,84 @@ class _GenerateQuizPageState extends State<GenerateQuizPage> {
         throw Exception('Server did not return quiz_id.');
       }
 
-      // Pull the created quiz & questions from Firestore → cache locally
+      // Pull the created quiz & questions from Firestore → cache locally.
+      // (If rules/network block these, we still add a minimal local record below.)
       final q1 = await FirestoreService.fetchQuizById(quizId);
       if (q1.status == FetchStatus.error) {
-        throw Exception(q1.errorMessage ?? 'Failed to fetch quiz by id');
+        // don’t throw yet; we will add a minimal local row so “My Quizzes” isn’t empty
+        // and let the user still proceed. The next refresh can hydrate from Firestore.
+        // ignore
       }
 
       final q2 = await FirestoreService.fetchQuestionsByQuizId(
         quizId,
         isAdmin: false,
       );
-      if (q2.status == FetchStatus.error) {
-        throw Exception(q2.errorMessage ?? 'Failed to fetch quiz questions');
-      }
+      // If this fails, it’s ok — the quiz row is enough to show in “My Quizzes”.
+
+      // Defensive: ensure at least a minimal local row exists so the list is never empty.
+      // (If Firestore fetch already inserted, this replace is a no-op.)
+      final nowIso = DateTime.now().toIso8601String();
+      await CacheRepository.saveUserQuiz({
+        'quiz_id': quizId,
+        'title': _topicCtrl.text.trim().isEmpty ? 'My AI Quiz' : _topicCtrl.text.trim(),
+        'description': 'Generated with AI',
+        'difficulty': _difficulty,
+        'owner_id': uid,                 // FK requires a users row to exist (already addressed earlier)
+        'source': 'ai',
+        'deleted': 0,
+        'deleted_at': null,
+        'created_at': nowIso,
+        'updated_at': nowIso,
+        'num_questions': _numQuestions,  // schema has this column
+      });
 
       if (!mounted) return;
 
-      // Offer options: open now vs. return to My Quizzes
+      // We need HomeTabsPage to refresh “My Quizzes”. It listens for `true`
+      // from Navigator.pop when this page finishes (see _openGenerator()).
+      // Both dialog actions below now cause a pop with `true`.
+
       await showDialog(
         context: context,
         builder: (_) => AlertDialog(
           title: const Text('Quiz Ready'),
           content: Text(
-              'Your quiz has been created successfully.\n\nID: $quizId\n\nOpen now or find it under "My Quizzes".'),
+            'Your quiz has been created successfully.\n\n'
+                'ID: $quizId\n\n'
+                'Open now or find it under "My Quizzes".',
+          ),
           actions: [
             TextButton(
               onPressed: () {
-                Navigator.of(context).pop(); // close dialog
-                Navigator.of(context).pop(true); // close page, signal refresh
+                // Close dialog, then close this page with `true` to refresh/switch tab.
+                Navigator.of(context).pop();           // close dialog
+                Navigator.of(context).pop(true);       // return to Home, trigger refresh
               },
               child: const Text('My Quizzes'),
             ),
             FilledButton.icon(
               onPressed: () {
-                Navigator.of(context).pop(); // close dialog
-                // Go straight to player
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => QuizPlayerPage(
-                      quizId: quizId,
-                      title: _topicCtrl.text.trim().isEmpty
-                          ? 'My AI Quiz'
-                          : _topicCtrl.text.trim(),
-                      difficulty: _difficulty,
-                      isAdmin: false,
+                // Close dialog, return to Home with `true` (refresh),
+                // then push Player shortly after from the same Navigator.
+                final navigator = Navigator.of(context);
+                navigator.pop();            // close dialog
+                navigator.pop(true);        // close page with result=true (Home will refresh & switch)
+                // Open the player after the pop completes.
+                Future.delayed(const Duration(milliseconds: 250), () {
+                  navigator.push(
+                    MaterialPageRoute(
+                      builder: (_) => QuizPlayerPage(
+                        quizId: quizId,
+                        title: _topicCtrl.text.trim().isEmpty
+                            ? 'My AI Quiz'
+                            : _topicCtrl.text.trim(),
+                        difficulty: _difficulty,
+                        isAdmin: false,
+                      ),
                     ),
-                  ),
-                );
+                  );
+                });
               },
               icon: const Icon(Icons.play_arrow),
               label: const Text('Play Now'),
