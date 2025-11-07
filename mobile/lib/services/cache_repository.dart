@@ -1,14 +1,78 @@
 import 'dart:math';
 import 'package:sqflite/sqflite.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'sqlite_service.dart';
 
 class CacheRepository {
+  /// Cache of existing columns per table to avoid repeated PRAGMA calls.
+  static final Map<String, Set<String>> _tableColumnsCache = {};
+
+  /// Returns the set of existing columns for a given table, cached.
+  static Future<Set<String>> _existingColumns(String table) async {
+    if (_tableColumnsCache.containsKey(table)) {
+      return _tableColumnsCache[table]!;
+    }
+    final rows = await SQLiteService.db.rawQuery('PRAGMA table_info($table);');
+    final cols = rows
+        .map((r) => (r['name'] ?? '').toString())
+        .where((n) => n.isNotEmpty)
+        .toSet();
+    _tableColumnsCache[table] = cols;
+    return cols;
+  }
+
+  /// Filters a payload by both an allowed set and the actual existing columns.
+  static Future<Map<String, dynamic>> _filterForTable({
+    required String table,
+    required Map<String, dynamic> data,
+    required Set<String> allowed,
+  }) async {
+    final existing = await _existingColumns(table);
+    final out = <String, dynamic>{};
+    for (final e in data.entries) {
+      if (allowed.contains(e.key) && existing.contains(e.key)) {
+        out[e.key] = e.value;
+      }
+    }
+    return out;
+  }
+
+  /// Ensure a parent user row exists for FK owner_id → users(uid).
+  static Future<void> _ensureUserRow(String uid) async {
+    if (uid.isEmpty) return; // nothing we can do
+    final found = await SQLiteService.db.query(
+      'users',
+      columns: const ['uid'],
+      where: 'uid = ?',
+      whereArgs: [uid],
+      limit: 1,
+    );
+    if (found.isNotEmpty) return;
+
+    final now = DateTime.now().toIso8601String();
+    // Minimal insert to satisfy FK; other fields can be filled later from Firestore.
+    await SQLiteService.db.insert(
+      'users',
+      {
+        'uid': uid,
+        'email': null,
+        'display_name': null,
+        'role': null,
+        'current_plan': null,
+        'plan_updated_at': null,
+        'created_at': now,
+        'updated_at': now,
+        'deleted': 0,
+        'deleted_at': null,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+  }
+
   // -------------------------
   // QUIZZES (ADMIN/GLOBAL)
   // -------------------------
   static Future<void> saveAdminQuiz(Map<String, dynamic> quiz) async {
-    // Some devices might still have an older DB without the newest columns.
-    // To avoid "no column named owner_id" errors, insert only known-safe columns.
     const allowedColumns = {
       'quiz_id',
       'title',
@@ -22,18 +86,17 @@ class CacheRepository {
       'deleted_at',
       'created_at',
       'updated_at',
-      // The following may exist in newer schema; include if present but ignore if not.
+      // optional if present in schema on device:
       'owner_id',
       'source',
       'num_questions',
     };
 
-    final filtered = <String, dynamic>{};
-    for (final entry in quiz.entries) {
-      if (allowedColumns.contains(entry.key)) {
-        filtered[entry.key] = entry.value;
-      }
-    }
+    final filtered = await _filterForTable(
+      table: 'cache_admin_quizzes',
+      data: quiz,
+      allowed: allowedColumns,
+    );
 
     await SQLiteService.db.insert(
       'cache_admin_quizzes',
@@ -72,10 +135,31 @@ class CacheRepository {
   // -------------------------
   static Future<void> saveAdminQuestions(List<Map<String, dynamic>> questions) async {
     final batch = SQLiteService.db.batch();
+
+    const allowedColumns = {
+      'question_id',
+      'quiz_id',
+      'order',
+      'index',
+      'text',
+      'options',
+      'correct_index',
+      'image_url',
+      'created_at',
+      'updated_at',
+    };
+    final existing = await _existingColumns('cache_admin_questions');
+
     for (final q in questions) {
+      final filtered = <String, dynamic>{};
+      for (final e in q.entries) {
+        if (allowedColumns.contains(e.key) && existing.contains(e.key)) {
+          filtered[e.key] = e.value;
+        }
+      }
       batch.insert(
         'cache_admin_questions',
-        q,
+        filtered,
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
     }
@@ -87,7 +171,6 @@ class CacheRepository {
       'cache_admin_questions',
       where: 'quiz_id = ?',
       whereArgs: [quizId],
-      // Prefer "order", fallback to legacy "index"
       orderBy: 'COALESCE("order","index") ASC',
     );
   }
@@ -96,9 +179,54 @@ class CacheRepository {
   // 🆕 QUIZZES (USER / MY QUIZZES)
   // -------------------------
   static Future<void> saveUserQuiz(Map<String, dynamic> quiz) async {
+    // Resolve owner_id (from payload or current Firebase user)
+    String ownerId = (quiz['owner_id']?.toString() ?? '').trim();
+    if (ownerId.isEmpty) {
+      ownerId = FirebaseAuth.instance.currentUser?.uid?.trim() ?? '';
+    }
+    // Ensure parent FK row exists (users.uid = ownerId)
+    if (ownerId.isNotEmpty) {
+      await _ensureUserRow(ownerId);
+    }
+
+    // Build filtered map; make sure owner_id is present in the payload we insert.
+    final enriched = Map<String, dynamic>.from(quiz);
+    enriched['owner_id'] = ownerId;
+
+    const allowedColumns = {
+      'quiz_id',
+      'title',
+      'description',
+      'difficulty',
+      'owner_id',
+      'source',
+      'deleted',
+      'deleted_at',
+      'created_at',
+      'updated_at',
+      'num_questions', // safely ignored if device schema lacks it
+    };
+
+    final filtered = await _filterForTable(
+      table: 'user_quizzes',
+      data: enriched,
+      allowed: allowedColumns,
+    );
+
+    // If, for some reason, owner_id is still missing (empty and column exists),
+    // set a last-resort placeholder to avoid NOT NULL FK violation in local dev.
+    final existingCols = await _existingColumns('user_quizzes');
+    if ((filtered['owner_id'] == null || (filtered['owner_id'] as String).isEmpty) &&
+        existingCols.contains('owner_id')) {
+      // Create a local placeholder user and use it.
+      final placeholder = 'local_${DateTime.now().millisecondsSinceEpoch}';
+      await _ensureUserRow(placeholder);
+      filtered['owner_id'] = placeholder;
+    }
+
     await SQLiteService.db.insert(
       'user_quizzes',
-      quiz,
+      filtered,
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
@@ -117,10 +245,31 @@ class CacheRepository {
   // -------------------------
   static Future<void> saveUserQuestions(List<Map<String, dynamic>> questions) async {
     final batch = SQLiteService.db.batch();
+
+    const allowedColumns = {
+      'question_id',
+      'quiz_id',
+      'order',
+      'index',
+      'text',
+      'options',
+      'correct_index',
+      'image_url',
+      'created_at',
+      'updated_at',
+    };
+    final existing = await _existingColumns('user_questions');
+
     for (final q in questions) {
+      final filtered = <String, dynamic>{};
+      for (final e in q.entries) {
+        if (allowedColumns.contains(e.key) && existing.contains(e.key)) {
+          filtered[e.key] = e.value;
+        }
+      }
       batch.insert(
         'user_questions',
-        q,
+        filtered,
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
     }
@@ -139,14 +288,7 @@ class CacheRepository {
   // -------------------------
   // ATTEMPTS (runtime shape)
   // -------------------------
-
-  /// Inserts a completed attempt into the `attempts` table.
-  /// Returns the generated attempt_id (UUID-ish string).
   static Future<String> insertAttempt(Map<String, dynamic> attempt) async {
-    // attempt should contain:
-    // quiz_id, quiz_title, difficulty, started_at, completed_at,
-    // score, num_correct, num_total
-    // We'll generate attempt_id if not provided.
     String attemptId =
     (attempt['attempt_id'] ?? _pseudoUuid('att_')).toString();
 
@@ -171,8 +313,6 @@ class CacheRepository {
     return attemptId;
   }
 
-  /// Bulk-insert child answers into `attempt_answers`.
-  /// Each map should include: question_id, q_index, selected_index, correct_index, is_correct
   static Future<void> insertAttemptAnswers(
       String attemptId, List<Map<String, dynamic>> answers) async {
     final batch = SQLiteService.db.batch();

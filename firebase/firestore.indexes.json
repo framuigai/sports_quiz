@@ -4,11 +4,31 @@
       "collectionGroup": "quizzes",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "is_admin_quiz",    "order": "ASCENDING" },
+        { "fieldPath": "is_admin_quiz", "order": "ASCENDING" },
         { "fieldPath": "available_to_all", "order": "ASCENDING" },
-        { "fieldPath": "is_approved",      "order": "ASCENDING" },
-        { "fieldPath": "deleted",          "order": "ASCENDING" },
-        { "fieldPath": "updated_at",       "order": "DESCENDING" }
+        { "fieldPath": "is_approved", "order": "ASCENDING" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "updated_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "quizzes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "owner_id", "order": "ASCENDING" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "updated_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "quizzes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "is_admin_quiz", "order": "ASCENDING" },
+        { "fieldPath": "available_to_all", "order": "ASCENDING" },
+        { "fieldPath": "is_approved", "order": "ASCENDING" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
       ]
     }
   ],

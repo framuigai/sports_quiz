@@ -1,3 +1,4 @@
+// firestore.rules
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -25,7 +26,7 @@ service cloud.firestore {
       //    is_admin_quiz == true && available_to_all == true &&
       //    is_approved == true && deleted == 0/false
       //
-      // 2) (Optional) Private quizzes visible to owner (if you later add owner_id)
+      // 2) Private quizzes visible to owner (owner_id == uid)
       allow get, list: if isSignedIn() && (
         (
           resource.data.is_admin_quiz == true &&
@@ -33,7 +34,6 @@ service cloud.firestore {
           resource.data.is_approved == true &&
           isNotDeleted(resource)
         ) || (
-          // Owner-only visibility support (for future non-admin quizzes)
           resource.data.owner_id == request.auth.uid &&
           isNotDeleted(resource)
         )
@@ -44,15 +44,22 @@ service cloud.firestore {
       allow create, update, delete: if false;
 
       // -----------------------
-      // 🧩 NEW: Questions subcollection (READ-ONLY for clients)
+      // Questions subcollection (READ-ONLY for clients)
       // -----------------------
       match /questions/{qid} {
-        // Allow reads only if the PARENT quiz is visible under the same constraints
-        allow get, list: if isSignedIn() &&
-          get(/databases/$(database)/documents/quizzes/$(quizId)).data.is_admin_quiz == true &&
-          get(/databases/$(database)/documents/quizzes/$(quizId)).data.available_to_all == true &&
-          get(/databases/$(database)/documents/quizzes/$(quizId)).data.is_approved == true &&
-          isNotDeleted(get(/databases/$(database)/documents/quizzes/$(quizId)));
+        // Allow reads if the PARENT quiz is visible to this user under
+        // the same constraints as above (admin-global OR owner-private).
+        allow get, list: if isSignedIn() && (
+          (
+            get(/databases/$(database)/documents/quizzes/$(quizId)).data.is_admin_quiz == true &&
+            get(/databases/$(database)/documents/quizzes/$(quizId)).data.available_to_all == true &&
+            get(/databases/$(database)/documents/quizzes/$(quizId)).data.is_approved == true &&
+            isNotDeleted(get(/databases/$(database)/documents/quizzes/$(quizId)))
+          ) || (
+            get(/databases/$(database)/documents/quizzes/$(quizId)).data.owner_id == request.auth.uid &&
+            isNotDeleted(get(/databases/$(database)/documents/quizzes/$(quizId)))
+          )
+        );
 
         // No client-side writes; Admin SDK only
         allow create, update, delete: if false;

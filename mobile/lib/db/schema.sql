@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS user_quizzes (
   deleted_at TEXT,
   created_at TEXT,
   updated_at TEXT,
+  num_questions INTEGER,
   FOREIGN KEY (owner_id) REFERENCES users(uid) ON DELETE CASCADE
 );
 

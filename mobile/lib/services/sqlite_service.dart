@@ -16,7 +16,7 @@ class SQLiteService {
 
     _db = await openDatabase(
       path,
-      // ⬆️ bump version to trigger onUpgrade for new columns (order/index on question tables)
+      // ⬆️ bump version to trigger onUpgrade for new columns
       version: 3,
       onConfigure: (db) async {
         // Ensure FKs are enforced for this connection.
@@ -30,12 +30,11 @@ class SQLiteService {
       onUpgrade: (db, oldVersion, newVersion) async {
         // Lightweight migrations for existing installs.
 
-        // v2: add columns to cache_admin_quizzes used by newer code.
+        // v2: cache_admin_quizzes new columns
         if (oldVersion < 2) {
-          // Wrap each ALTER in try/catch so re-running is safe.
           try {
             await db.execute(
-              "ALTER TABLE cache_admin_quizzes ADD COLUMN owner_id TEXT DEFAULT ''",
+              'ALTER TABLE cache_admin_quizzes ADD COLUMN owner_id TEXT DEFAULT \'\'',
             );
           } catch (_) {}
           try {
@@ -49,34 +48,24 @@ class SQLiteService {
             );
           } catch (_) {}
 
-          // Ensure late-added tables also exist
           await _ensureMigrations(db);
         }
 
-        // ✅ v3: add missing "order"/"index" columns on question tables to align with schema & app code.
+        // v3: user_quizzes add num_questions
         if (oldVersion < 3) {
-          // cache_admin_questions
           try {
-            await db.execute('ALTER TABLE cache_admin_questions ADD COLUMN "order" INTEGER');
-          } catch (_) {}
-          try {
-            await db.execute('ALTER TABLE cache_admin_questions ADD COLUMN "index" INTEGER');
-          } catch (_) {}
+            await db.execute(
+              'ALTER TABLE user_quizzes ADD COLUMN num_questions INTEGER',
+            );
+          } catch (_) {
+            // ignore "duplicate column name" if it already exists
+          }
 
-          // user_questions
-          try {
-            await db.execute('ALTER TABLE user_questions ADD COLUMN "order" INTEGER');
-          } catch (_) {}
-          try {
-            await db.execute('ALTER TABLE user_questions ADD COLUMN "index" INTEGER');
-          } catch (_) {}
-
-          // Ensure tables exist even if a very old install missed them
           await _ensureMigrations(db);
         }
       },
       onOpen: (db) async {
-        // Ensure tables created by late schema changes exist.
+        // Ensure attempts tables exist even if schema.sql wasn't updated yet
         await _ensureMigrations(db);
       },
     );
