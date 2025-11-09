@@ -1,8 +1,8 @@
-# backend/app/admin/routes.py
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta
 
 from flask import (
     Blueprint,
@@ -82,12 +82,12 @@ def _admin_guard_ok(req: request) -> bool:
 def _enforce_admin_guard():
     # Only guard the /admin area; skip static, etc.
     if not _admin_guard_ok(request):
-        # Avoid redirect loops — return 403 directly
-        abort(403)
+      # Avoid redirect loops — return 403 directly
+      abort(403)
 
 
 # -----------------------------
-# Dashboard & Attempts (basic)
+# Dashboard & Attempts
 # -----------------------------
 @admin_bp.route("/")
 def dashboard():
@@ -96,7 +96,64 @@ def dashboard():
 
 @admin_bp.route("/attempts")
 def attempts():
-    return render_template("attempts.html")
+    """Simple attempts explorer with filters."""
+    # Filters
+    user_id = (request.args.get("user_id") or "").strip() or None
+    quiz_id = (request.args.get("quiz_id") or "").strip() or None
+    difficulty = (request.args.get("difficulty") or "").strip().lower() or None
+    start_s = (request.args.get("start") or "").strip() or None  # YYYY-MM-DD
+    end_s = (request.args.get("end") or "").strip() or None      # YYYY-MM-DD
+
+    q: firestore.Query = _db().collection("attempts")
+    q = q.where(filter=FieldFilter("deleted", "==", False))
+
+    if user_id:
+      q = q.where(filter=FieldFilter("user_id", "==", user_id))
+    if quiz_id:
+      q = q.where(filter=FieldFilter("quiz_id", "==", quiz_id))
+    if difficulty:
+      q = q.where(filter=FieldFilter("difficulty", "==", difficulty))
+
+    # Date window on started_at
+    # When start is provided without end -> end = today inclusive.
+    start_dt: Optional[datetime] = None
+    end_dt: Optional[datetime] = None
+    try:
+      if start_s:
+        start_dt = datetime.strptime(start_s, "%Y-%m-%d")
+      if end_s:
+        end_dt = datetime.strptime(end_s, "%Y-%m-%d") + timedelta(days=1) - timedelta(milliseconds=1)
+      elif start_dt:
+        end_dt = datetime.utcnow()
+    except Exception:
+      flash("Invalid date format. Use YYYY-MM-DD.", "error")
+
+    # Firestore range filters require orderBy on the same field
+    if start_dt:
+      q = q.where(filter=FieldFilter("started_at", ">=", start_dt))
+    if end_dt:
+      q = q.where(filter=FieldFilter("started_at", "<=", end_dt))
+    q = q.order_by("started_at", direction=firestore.Query.DESCENDING)
+
+    items: List[Dict[str, Any]] = []
+    try:
+      for snap in q.stream():
+        data = snap.to_dict() or {}
+        data["id"] = snap.id
+        items.append(data)
+    except Exception as e:
+      flash(f"Failed to load attempts: {e}", "error")
+      items = []
+
+    return render_template(
+      "attempts.html",
+      items=items,
+      user_id=user_id or "",
+      quiz_id=quiz_id or "",
+      difficulty=difficulty or "",
+      start=start_s or "",
+      end=end_s or "",
+    )
 
 
 # -----------------------------
