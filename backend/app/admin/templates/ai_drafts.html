@@ -1,0 +1,89 @@
+<!-- backend/app/admin/templates/ai_drafts.html -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8"/>
+    <title>AI Drafts</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 8px 10px; border-bottom: 1px solid #ddd; text-align: left; }
+      th { background: #f7f7f7; }
+      .actions form { display: inline-block; margin-right: 8px; }
+      .pill { font-size: 12px; padding: 2px 6px; border-radius: 8px; background: #eee; }
+      .ok { background: #e6ffed; }
+      .warn { background: #fff6e6; }
+      .danger { background: #ffe6e6; }
+      .btn { padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; background: #fafafa; cursor: pointer; }
+      .btn-primary { background: #2563eb; color: #fff; border-color: #1d4ed8; }
+      .btn-danger { background: #ef4444; color: #fff; border-color: #dc2626; }
+      .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+      a { color: #2563eb; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .flash { margin-bottom: 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <h2>AI Drafts</h2>
+      <div><a href="{{ url_for('admin.quizzes') }}">All Quizzes</a></div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash">
+          {% for category, message in messages %}
+            <div class="pill {% if category == 'success' %}ok{% elif category == 'error' %}danger{% else %}warn{% endif %}">
+              {{ message }}
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    {% if items and items|length > 0 %}
+      <table>
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Difficulty</th>
+            <th>Num Qs</th>
+            <th>Available</th>
+            <th>Approved</th>
+            <th>Source</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for q in items %}
+            <tr>
+              <td>
+                <a href="{{ url_for('admin.quiz_detail', doc_id=q.id) }}">
+                  {{ q.title }}
+                </a>
+                {% if q.description %}<div style="color:#666;font-size:12px;">{{ q.description }}</div>{% endif %}
+              </td>
+              <td>{{ q.difficulty or 'easy' }}</td>
+              <td>{{ q.num_questions if q.num_questions is not none else '—' }}</td>
+              <td><span class="pill">{{ q.available_to_all and 'yes' or 'no' }}</span></td>
+              <td><span class="pill">{{ q.is_approved and 'yes' or 'no' }}</span></td>
+              <td><span class="pill">{{ q.source or 'ai' }}</span></td>
+              <td class="actions">
+                <a class="btn" href="{{ url_for('admin.quiz_detail', doc_id=q.id) }}">View</a>
+                <form method="post" action="{{ url_for('admin.publish_quiz', doc_id=q.id) }}">
+                  <button class="btn btn-primary" type="submit">Approve &amp; Publish</button>
+                </form>
+                <form method="post" action="{{ url_for('admin.soft_delete_quiz', doc_id=q.id) }}">
+                  <button class="btn btn-danger" type="submit">Soft Delete</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>No AI drafts found.</p>
+    {% endif %}
+  </body>
+</html>

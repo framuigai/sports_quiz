@@ -144,6 +144,60 @@ def quizzes():
 
 
 # -----------------------------
+# NEW: AI Drafts List
+# -----------------------------
+@admin_bp.route("/ai_drafts")
+def ai_drafts():
+    try:
+        q = (
+            _db()
+            .collection("quizzes")
+            .where(filter=FieldFilter("is_admin_quiz", "==", True))
+            .where(filter=FieldFilter("is_approved", "==", False))
+            .where(filter=FieldFilter("deleted", "==", False))
+            .order_by("updated_at", direction=firestore.Query.DESCENDING)
+        )
+        items: List[Dict[str, Any]] = []
+        for snap in q.stream():
+            data = snap.to_dict() or {}
+            data["id"] = snap.id
+            # Safe defaults for template
+            data.setdefault("title", "(untitled)")
+            data.setdefault("description", "")
+            data.setdefault("difficulty", "easy")
+            data.setdefault("available_to_all", False)
+            data.setdefault("is_approved", False)
+            data.setdefault("num_questions", None)
+            data.setdefault("source", "ai")
+            items.append(data)
+
+        return render_template("ai_drafts.html", items=items)
+    except Exception as e:
+        flash(f"Failed to load AI drafts: {e}", "error")
+        return render_template("ai_drafts.html", items=[])
+
+
+# -----------------------------
+# NEW: Publish Draft (Approve + Make Global)
+# -----------------------------
+@admin_bp.route("/quizzes/<doc_id>/publish", methods=["POST"])
+def publish_quiz(doc_id: str):
+    ref = _quiz_ref(doc_id)
+    try:
+        ref.update(
+            {
+                "is_approved": True,
+                "available_to_all": True,
+                "updated_at": SERVER_TIMESTAMP,
+            }
+        )
+        flash("Draft approved & published.", "success")
+    except Exception as e:
+        flash(f"Failed to publish: {e}", "error")
+    return redirect(url_for("admin.ai_drafts"))
+
+
+# -----------------------------
 # Create Quiz (GET / POST)
 # -----------------------------
 @admin_bp.route("/quizzes/new", methods=["GET", "POST"])

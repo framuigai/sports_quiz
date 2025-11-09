@@ -41,16 +41,17 @@ def generate_quiz():
     num_questions = int(payload.get("num_questions") or 10)
 
     # Flow control
-    # mode = "user" or "admin"
+    # mode in {"user", "admin", "admin_draft"}
     mode = (payload.get("mode") or "user").strip().lower()
     owner_id = (payload.get("owner_id") or "").strip() or None
     is_admin_mode = mode == "admin"
+    is_admin_draft = mode == "admin_draft"
 
     if not topic:
         return jsonify({"error": "topic is required"}), 400
 
     # For user mode we need an owner_id so mobile can fetch `owner_id == uid`
-    if not is_admin_mode and not owner_id:
+    if not (is_admin_mode or is_admin_draft) and not owner_id:
         return jsonify({"error": "owner_id is required when mode=='user'"}), 400
 
     try:
@@ -65,6 +66,7 @@ def generate_quiz():
 
         # Flags to align with mobile fetch logic:
         # - Admin tab requires: is_admin_quiz==true, available_to_all==true, is_approved==true, deleted==false
+        # - Admin draft: is_admin_quiz==true, available_to_all==false, is_approved==false
         # - My Quizzes uses owner_id == uid; available_to_all remains False; is_approved True
         if is_admin_mode:
             quiz_doc = QuizWrite(
@@ -72,8 +74,21 @@ def generate_quiz():
                 description=quiz_in.description or "",
                 difficulty=quiz_in.difficulty,
                 is_admin_quiz=True,
-                available_to_all=True,   # <-- ensure visible to Admin/Global tab
-                is_approved=True,        # <-- ensure passes mobile filter
+                available_to_all=True,   # visible to Admin/Global tab
+                is_approved=True,        # passes mobile filter
+                deleted=False,
+                source="ai",
+                owner_id=None,
+                num_questions=len(quiz_in.questions),
+            ).model_dump()
+        elif is_admin_draft:
+            quiz_doc = QuizWrite(
+                title=quiz_in.title,
+                description=quiz_in.description or "",
+                difficulty=quiz_in.difficulty,
+                is_admin_quiz=True,
+                available_to_all=False,  # hidden until publish
+                is_approved=False,       # draft
                 deleted=False,
                 source="ai",
                 owner_id=None,
