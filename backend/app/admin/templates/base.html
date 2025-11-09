@@ -14,6 +14,7 @@
       <nav class="nav">
         <a href="{{ url_for('admin.dashboard') }}" class="nav__link {% if request.endpoint=='admin.dashboard' %}is-active{% endif %}">Dashboard</a>
         <a href="{{ url_for('admin.quizzes') }}" class="nav__link {% if request.endpoint=='admin.quizzes' %}is-active{% endif %}">Quizzes</a>
+        <a href="{{ url_for('admin.ai_drafts') }}" class="nav__link {% if request.endpoint=='admin.ai_drafts' %}is-active{% endif %}">AI Drafts</a>
         <a href="{{ url_for('admin.attempts') }}" class="nav__link {% if request.endpoint=='admin.attempts' %}is-active{% endif %}">Attempts</a>
       </nav>
     </div>

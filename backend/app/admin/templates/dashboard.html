@@ -23,12 +23,138 @@
     <span class="btn">Open List</span>
   </a>
 
-  <a class="card card--action" href="{{ url_for('admin.attempts') }}">
+  <a class="card card--action" href="{{ url_for('admin.ai_drafts') }}">
     <div class="card__header">
-      <h3>Attempts</h3>
+      <h3>AI Drafts</h3>
     </div>
-    <p>Review user attempts and stats (placeholder for now).</p>
-    <span class="btn">View Attempts</span>
+    <p>Review AI-generated drafts and publish to all users.</p>
+    <span class="btn">Open Drafts</span>
   </a>
 </section>
+
+{# ────────────────────────────────────────────────────────────────────────────── #}
+{# Generate Admin AI Draft (client-side POST to /ai/generate_quiz as JSON)      #}
+{# ────────────────────────────────────────────────────────────────────────────── #}
+<section class="card mt-16">
+  <div class="card__header">
+    <h3 class="h3">Generate Admin AI Draft</h3>
+  </div>
+  <p class="muted">Creates a draft quiz (not visible to users) using the AI generator. You can review it under <strong>AI Drafts</strong> and publish later.</p>
+
+  <form id="ai-draft-form" class="form" onsubmit="return false;">
+    <div class="grid grid--3">
+      <div class="form__row">
+        <label for="topic">Topic <span class="req">*</span></label>
+        <input id="topic" name="topic" type="text" required placeholder="e.g., Premier League History">
+      </div>
+
+      <div class="form__row">
+        <label for="difficulty">Difficulty</label>
+        <select id="difficulty" name="difficulty">
+          <option value="easy">easy</option>
+          <option value="medium" selected>medium</option>
+          <option value="hard">hard</option>
+        </select>
+      </div>
+
+      <div class="form__row">
+        <label for="num_questions">Questions (1–20)</label>
+        <input id="num_questions" name="num_questions" type="number" min="1" max="20" value="8" required>
+      </div>
+    </div>
+
+    <details class="mt-8">
+      <summary class="muted">Advanced</summary>
+      <div class="form__row mt-8">
+        <label for="admin_secret">Admin Secret (optional)</label>
+        <input id="admin_secret" name="admin_secret" type="password" placeholder="If your /ai endpoint requires X-Admin-Secret">
+        <small class="muted">If <code>ADMIN_SECRET</code> is set on the server, provide it to authorize this request.</small>
+      </div>
+    </details>
+
+    <div class="form__actions">
+      <button id="btn-generate" class="btn btn--primary" type="submit">Generate Draft</button>
+      <a class="btn" href="{{ url_for('admin.ai_drafts') }}">Open AI Drafts</a>
+    </div>
+
+    <div id="ai-draft-result" class="mt-8 muted" style="display:none;"></div>
+  </form>
+</section>
+
+<script>
+  (function () {
+    const form = document.getElementById('ai-draft-form');
+    const btn = document.getElementById('btn-generate');
+    const result = document.getElementById('ai-draft-result');
+
+    async function generateDraft() {
+      const topic = document.getElementById('topic').value.trim();
+      const difficulty = document.getElementById('difficulty').value || 'medium';
+      const numQuestions = parseInt(document.getElementById('num_questions').value || '8', 10);
+      const adminSecret = document.getElementById('admin_secret').value.trim();
+
+      if (!topic || !numQuestions || numQuestions < 1 || numQuestions > 20) {
+        alert('Please provide a topic and 1–20 questions.');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Generating…';
+      result.style.display = 'none';
+      result.textContent = '';
+
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (adminSecret) headers['X-Admin-Secret'] = adminSecret;
+
+        const resp = await fetch('/ai/generate_quiz', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            topic,
+            difficulty,
+            num_questions: numQuestions,
+            mode: 'admin_draft'
+          })
+        });
+
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          const msg = (data && (data.error || data.message)) || 'Failed to generate draft.';
+          throw new Error(msg);
+        }
+
+        // Success
+        const id = data.quiz_id;
+        result.style.display = 'block';
+        if (id) {
+          result.innerHTML = `
+            <div class="flash flash--success">
+              <strong>Draft created.</strong>
+              <div class="mt-4">
+                <a class="btn btn--small" href="/admin/quizzes/${id}">View Draft</a>
+                <a class="btn btn--small" href="{{ url_for('admin.ai_drafts') }}">Open AI Drafts</a>
+              </div>
+            </div>`;
+        } else {
+          result.innerHTML = `
+            <div class="flash flash--success">
+              Draft created. <a href="{{ url_for('admin.ai_drafts') }}">Open AI Drafts</a>
+            </div>`;
+        }
+      } catch (err) {
+        result.style.display = 'block';
+        result.innerHTML = `<div class="flash flash--error">${(err && err.message) || err}</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Generate Draft';
+      }
+    }
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      generateDraft();
+    });
+  })();
+</script>
 {% endblock %}
