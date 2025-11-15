@@ -1,4 +1,3 @@
-// mobile/lib/pages/quizzes_page.dart
 import 'package:flutter/material.dart';
 
 import '../services/firestore_service.dart';
@@ -8,6 +7,7 @@ import '../services/firebase_service.dart';
 import '../widgets/snackbar_helper.dart';
 import 'quiz_player_page.dart';
 import 'generate_quiz_page.dart';
+import 'history_page.dart';
 import '../main.dart' show appRouteObserver;
 
 /// Home with two tabs: Admin Quizzes & My Quizzes.
@@ -48,11 +48,22 @@ class _QuizzesPageState extends State<QuizzesPage> with SingleTickerProviderStat
     }
   }
 
+  void _openHistory() {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HistoryPage()));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Sports Quiz'),
+        actions: [
+          IconButton(
+            tooltip: 'History',
+            onPressed: _openHistory,
+            icon: const Icon(Icons.history),
+          ),
+        ],
         bottom: TabBar(
           controller: _tab,
           tabs: const [
@@ -89,6 +100,7 @@ class _AdminQuizzesTabState extends State<_AdminQuizzesTab> {
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _quizzes = [];
+  String _filter = 'all'; // all | easy | medium | hard
 
   @override
   void initState() {
@@ -128,6 +140,39 @@ class _AdminQuizzesTabState extends State<_AdminQuizzesTab> {
     }
   }
 
+  List<Map<String, dynamic>> get _filtered {
+    if (_filter == 'all') return _quizzes;
+    return _quizzes.where((q) {
+      final d = (q['difficulty'] ?? '').toString().toLowerCase();
+      return d == _filter;
+    }).toList();
+  }
+
+  Widget _buildFilters() {
+    Widget chip(String key, String label) {
+      final selected = _filter == key;
+      return Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: ChoiceChip(
+          label: Text(label),
+          selected: selected,
+          onSelected: (_) => setState(() => _filter = key),
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(children: [
+        chip('all', 'All'),
+        chip('easy', 'Easy'),
+        chip('medium', 'Medium'),
+        chip('hard', 'Hard'),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
@@ -138,14 +183,17 @@ class _AdminQuizzesTabState extends State<_AdminQuizzesTab> {
       return _EmptyState(onRetry: () => _loadQuizzes());
     }
 
+    final items = _filtered;
+
     return RefreshIndicator(
       onRefresh: () => _loadQuizzes(),
       child: ListView.separated(
         physics: const AlwaysScrollableScrollPhysics(),
-        itemCount: _quizzes.length,
+        itemCount: items.length + 1,
         separatorBuilder: (_, __) => const Divider(height: 1),
         itemBuilder: (context, i) {
-          final q = _quizzes[i];
+          if (i == 0) return _buildFilters();
+          final q = items[i - 1];
           return ListTile(
             title: Text(q['title'] ?? 'Untitled'),
             subtitle: Text('Difficulty: ${q['difficulty'] ?? 'N/A'}'),

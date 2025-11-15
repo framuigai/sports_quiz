@@ -1,4 +1,3 @@
-//
 // Quiz Player with play loop (Day 10):
 //  - Accepts quizId, title, difficulty via constructor
 //  - On load: best-effort Firestore fetch → always read from cache
@@ -163,7 +162,7 @@ class _QuizPlayerPageState extends State<QuizPlayerPage> {
     }
   }
 
-  void _finishQuiz() {
+  Future<void> _finishQuiz() async {
     final completedAt = DateTime.now();
     final total = _questions.length;
     final correct = _answers.where((a) => a.isCorrect).length;
@@ -176,7 +175,7 @@ class _QuizPlayerPageState extends State<QuizPlayerPage> {
       total: total,
     );
 
-    // Build the Attempt and navigate to Summary
+    // Build the Attempt
     final attempt = Attempt(
       quizId: widget.quizId,
       title: widget.title,
@@ -187,6 +186,41 @@ class _QuizPlayerPageState extends State<QuizPlayerPage> {
       answers: List<AnswerRecord>.from(_answers),
     );
 
+    // 🔐 Persist attempt cloud → local (best effort; ignore failures)
+    try {
+      final attemptId = await FirestoreService.createAttempt(
+        quizId: attempt.quizId,
+        quizTitle: attempt.title,
+        difficulty: widget.difficulty,
+        startedAt: attempt.startedAt,
+        completedAt: attempt.completedAt,
+        score: attempt.correctCount,
+        numCorrect: attempt.correctCount,
+        numTotal: attempt.totalQuestions,
+      );
+
+      // Prepare answers payloads with q_index
+      final answers = <Map<String, dynamic>>[];
+      for (var i = 0; i < _answers.length; i++) {
+        final a = _answers[i];
+        answers.add({
+          'question_id': a.questionId,
+          'q_index': i,
+          'selected_index': a.selectedIndex,
+          'correct_index': a.correctIndex,
+          'is_correct': a.isCorrect,
+          'elapsed_ms': null,
+        });
+      }
+
+      await FirestoreService.createAttemptAnswers(attemptId, answers);
+      // Local mirror already handled by the two calls above (they call CacheRepository).
+    } catch (_) {
+      // ignore; user still sees summary and local play result
+    }
+
+    if (!mounted) return;
+    // Navigate to Summary page
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => QuizSummaryPage(attempt: attempt),

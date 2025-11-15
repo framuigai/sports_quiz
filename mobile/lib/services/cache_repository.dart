@@ -330,6 +330,14 @@ class CacheRepository {
     await batch.commit(noResult: true);
   }
 
+  /// 🆕 Attempts query for History page
+  static Future<List<Map<String, dynamic>>> getMyAttempts() async {
+    return SQLiteService.db.query(
+      'attempts',
+      orderBy: 'started_at DESC',
+    );
+  }
+
   // --- helpers ---
   static String _pseudoUuid(String prefix) {
     final r = Random();

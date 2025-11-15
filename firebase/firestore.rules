@@ -67,7 +67,7 @@ service cloud.firestore {
     }
 
     // -----------------------
-    // Attempts collection (future)
+    // Attempts collection
     // -----------------------
     // Users can read their own attempts (not deleted)
     // Users can create attempts for themselves (not deleted)
@@ -82,6 +82,22 @@ service cloud.firestore {
         !(request.resource.data.deleted == true || request.resource.data.deleted == 1);
 
       allow update, delete: if false;
+
+      // -----------------------
+      // Answers subcollection (NEW)
+      // -----------------------
+      match /answers/{answerId} {
+        // Owner of the parent attempt may read their answers
+        allow get, list: if isSignedIn() &&
+          get(/databases/$(database)/documents/attempts/$(attemptId)).data.user_id == request.auth.uid;
+
+        // Owner of the parent attempt may create answers
+        allow create: if isSignedIn() &&
+          get(/databases/$(database)/documents/attempts/$(attemptId)).data.user_id == request.auth.uid;
+
+        // No client-side updates/deletes
+        allow update, delete: if false;
+      }
     }
 
     // -----------------------

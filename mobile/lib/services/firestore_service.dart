@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'cache_repository.dart';
 
 enum FetchStatus { successFromServer, error }
@@ -225,5 +226,128 @@ class FirestoreService {
     } catch (e) {
       return FetchOutcome.error('Error fetching questions: $e');
     }
+  }
+
+  // =========================
+  // 🆕 Attempts APIs (Day B)
+  // =========================
+
+  /// Create an attempt document in Firestore for the current user.
+  /// Returns the generated attemptId.
+  static Future<String> createAttempt({
+    required String quizId,
+    required String quizTitle,
+    required String difficulty,
+    required DateTime startedAt,
+    required DateTime completedAt,
+    required int score,
+    required int numCorrect,
+    required int numTotal,
+  }) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.isEmpty) {
+      throw StateError('Must be signed in to create an attempt');
+    }
+
+    final ref = _db.collection('attempts').doc();
+    await ref.set({
+      'attempt_id': ref.id,
+      'user_id': uid,
+      'quiz_id': quizId,
+      'quiz_title': quizTitle,
+      'difficulty': difficulty,
+      'started_at': Timestamp.fromDate(startedAt),
+      'completed_at': Timestamp.fromDate(completedAt),
+      'score': score,
+      'num_correct': numCorrect,
+      'num_total': numTotal,
+      'deleted': false,
+      'created_at': FieldValue.serverTimestamp(),
+      'updated_at': FieldValue.serverTimestamp(),
+    });
+
+    // Mirror locally (best effort)
+    await CacheRepository.insertAttempt({
+      'attempt_id': ref.id,
+      'quiz_id': quizId,
+      'quiz_title': quizTitle,
+      'difficulty': difficulty,
+      'started_at': startedAt.toIso8601String(),
+      'completed_at': completedAt.toIso8601String(),
+      'score': score,
+      'num_correct': numCorrect,
+      'num_total': numTotal,
+    });
+
+    return ref.id;
+  }
+
+  /// Write answers under attempts/{id}/answers.
+  /// `answers` is a list of maps with:
+  ///  question_id, q_index, selected_index, correct_index, is_correct, elapsed_ms (optional)
+  static Future<void> createAttemptAnswers(
+      String attemptId,
+      List<Map<String, dynamic>> answers,
+      ) async {
+    final col = _db.collection('attempts').doc(attemptId).collection('answers');
+    final batch = _db.batch();
+
+    for (final a in answers) {
+      final doc = col.doc();
+      batch.set(doc, {
+        'question_id': a['question_id']?.toString() ?? '',
+        'q_index': a['q_index'] ?? 0,
+        'selected_index': a['selected_index'] ?? -1,
+        'correct_index': a['correct_index'] ?? -1,
+        'is_correct': a['is_correct'] == true,
+        'elapsed_ms': a['elapsed_ms'],
+        'created_at': FieldValue.serverTimestamp(),
+        'updated_at': FieldValue.serverTimestamp(),
+      });
+    }
+    await batch.commit();
+
+    // Mirror locally (best effort)
+    await CacheRepository.insertAttemptAnswers(attemptId, answers);
+  }
+
+  /// Download my attempts and cache to SQLite.
+  static Future<FetchOutcome> fetchMyAttempts(String uid) async {
+    try {
+      final q = _db
+          .collection('attempts')
+          .where('user_id', isEqualTo: uid)
+          .where('deleted', isEqualTo: false)
+          .orderBy('started_at', descending: true);
+
+      final snaps = await q.get();
+      int count = 0;
+      for (final d in snaps.docs) {
+        final data = d.data();
+        final startedAt = _tsToIso(data['started_at']);
+        final completedAt = _tsToIso(data['completed_at']);
+        await CacheRepository.insertAttempt({
+          'attempt_id': d.id,
+          'quiz_id': data['quiz_id']?.toString() ?? '',
+          'quiz_title': data['quiz_title']?.toString() ?? '',
+          'difficulty': data['difficulty']?.toString() ?? 'medium',
+          'started_at': startedAt,
+          'completed_at': completedAt,
+          'score': (data['score'] ?? 0) as int,
+          'num_correct': (data['num_correct'] ?? 0) as int,
+          'num_total': (data['num_total'] ?? 0) as int,
+        });
+        count++;
+      }
+      return FetchOutcome.success(count);
+    } catch (e) {
+      return FetchOutcome.error('Error fetching attempts: $e');
+    }
+  }
+
+  static String _tsToIso(dynamic v) {
+    if (v is Timestamp) return v.toDate().toIso8601String();
+    if (v is DateTime) return v.toIso8601String();
+    return DateTime.now().toIso8601String();
   }
 }
