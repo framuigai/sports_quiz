@@ -12,6 +12,7 @@ from flask import (
     url_for,
     flash,
     abort,
+    Request,  # ✅ use the Flask Request type for annotations
 )
 from google.cloud import firestore
 from werkzeug.exceptions import NotFound
@@ -66,7 +67,7 @@ def _build_base_query(
     return q
 
 
-def _admin_guard_ok(req: request) -> bool:
+def _admin_guard_ok(req: Request) -> bool:
     """
     Minimal optional guard using a header or query param for development.
     If ADMIN_SECRET is unset, allow access (dev-friendly).
@@ -82,8 +83,8 @@ def _admin_guard_ok(req: request) -> bool:
 def _enforce_admin_guard():
     # Only guard the /admin area; skip static, etc.
     if not _admin_guard_ok(request):
-      # Avoid redirect loops — return 403 directly
-      abort(403)
+        # Avoid redirect loops — return 403 directly
+        abort(403)
 
 
 # -----------------------------
@@ -108,51 +109,51 @@ def attempts():
     q = q.where(filter=FieldFilter("deleted", "==", False))
 
     if user_id:
-      q = q.where(filter=FieldFilter("user_id", "==", user_id))
+        q = q.where(filter=FieldFilter("user_id", "==", user_id))
     if quiz_id:
-      q = q.where(filter=FieldFilter("quiz_id", "==", quiz_id))
+        q = q.where(filter=FieldFilter("quiz_id", "==", quiz_id))
     if difficulty:
-      q = q.where(filter=FieldFilter("difficulty", "==", difficulty))
+        q = q.where(filter=FieldFilter("difficulty", "==", difficulty))
 
     # Date window on started_at
     # When start is provided without end -> end = today inclusive.
     start_dt: Optional[datetime] = None
     end_dt: Optional[datetime] = None
     try:
-      if start_s:
-        start_dt = datetime.strptime(start_s, "%Y-%m-%d")
-      if end_s:
-        end_dt = datetime.strptime(end_s, "%Y-%m-%d") + timedelta(days=1) - timedelta(milliseconds=1)
-      elif start_dt:
-        end_dt = datetime.utcnow()
+        if start_s:
+            start_dt = datetime.strptime(start_s, "%Y-%m-%d")
+        if end_s:
+            end_dt = datetime.strptime(end_s, "%Y-%m-%d") + timedelta(days=1) - timedelta(milliseconds=1)
+        elif start_dt:
+            end_dt = datetime.utcnow()
     except Exception:
-      flash("Invalid date format. Use YYYY-MM-DD.", "error")
+        flash("Invalid date format. Use YYYY-MM-DD.", "error")
 
     # Firestore range filters require orderBy on the same field
     if start_dt:
-      q = q.where(filter=FieldFilter("started_at", ">=", start_dt))
+        q = q.where(filter=FieldFilter("started_at", ">=", start_dt))
     if end_dt:
-      q = q.where(filter=FieldFilter("started_at", "<=", end_dt))
+        q = q.where(filter=FieldFilter("started_at", "<=", end_dt))
     q = q.order_by("started_at", direction=firestore.Query.DESCENDING)
 
     items: List[Dict[str, Any]] = []
     try:
-      for snap in q.stream():
-        data = snap.to_dict() or {}
-        data["id"] = snap.id
-        items.append(data)
+        for snap in q.stream():
+            data = snap.to_dict() or {}
+            data["id"] = snap.id
+            items.append(data)
     except Exception as e:
-      flash(f"Failed to load attempts: {e}", "error")
-      items = []
+        flash(f"Failed to load attempts: {e}", "error")
+        items = []
 
     return render_template(
-      "attempts.html",
-      items=items,
-      user_id=user_id or "",
-      quiz_id=quiz_id or "",
-      difficulty=difficulty or "",
-      start=start_s or "",
-      end=end_s or "",
+        "attempts.html",
+        items=items,
+        user_id=user_id or "",
+        quiz_id=quiz_id or "",
+        difficulty=difficulty or "",
+        start=start_s or "",
+        end=end_s or "",
     )
 
 
@@ -338,16 +339,26 @@ def toggle_available(doc_id: str):
     ref = _quiz_ref(doc_id)
     try:
         @firestore.transactional
-        def txn_op(tx: firestore.Transaction):
-            snap = tx.get(ref)
+        def txn_op(transaction: firestore.Transaction) -> None:
+            # Read within the transaction
+            snap = ref.get(transaction=transaction)
             if not snap.exists:
                 raise NotFound("Quiz not found")
             data = snap.to_dict() or {}
             current = bool(data.get("available_to_all", False))
-            tx.update(ref, {"available_to_all": not current, "updated_at": SERVER_TIMESTAMP})
+            # Write within the same transaction
+            transaction.update(
+                ref,
+                {
+                    "available_to_all": not current,
+                    "updated_at": SERVER_TIMESTAMP,
+                },
+            )
 
-        txn = _db().transaction()
-        txn_op(txn)
+        # ✅ Call with a transaction instance
+        transaction = _db().transaction()
+        txn_op(transaction)
+
         flash("Availability toggled.", "success")
     except Exception as e:
         flash(f"Failed to toggle availability: {e}", "error")
